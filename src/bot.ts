@@ -639,7 +639,8 @@ export class Bot {
     let rendered;
     try {
       rendered = await renderer.render(c.content);
-      const url = await linkedin.publishCarousel(rendered, c.content.titulo, c.content.legenda);
+      // O **destaque** vira cor no slide; no título do documento do LinkedIn sairia com os asteriscos
+      const url = await linkedin.publishCarousel(rendered, c.content.titulo.replace(/\*\*/g, ""), c.content.legenda);
       await store.updateCarousel(c.id, { status: "published", published_at: this.iso(), post_url: url });
       await store.logAction("post", c.id, this.iso());
       await messenger.send(chatId, `🚀 <b>Carrossel publicado!</b> · ${esc(c.topic)}\n\n🔗 ${esc(url)}`);

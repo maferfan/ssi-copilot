@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Bot, DAILY_LIMIT, nextPublishLabel, parseMetrics } from "../src/bot";
 import { perfil } from "../src/perfil";
-import { click, makeDeps, msg, OWNER } from "./fakes";
+import { click, makeDeps, msg, OWNER, sampleCarousel } from "./fakes";
 
 const URL = "https://www.linkedin.com/posts/fulana_entrevistas-activity-1";
 const LONG_TEXT = "Os 5 erros mais comuns em entrevistas técnicas e como evitar cada um deles.";
@@ -520,5 +520,18 @@ describe("métricas da semana", () => {
     await bot.handleUpdate(click("ca:1"));
     await bot.publishCarousel();
     expect(store.carousels[0].post_url).toBe("https://www.linkedin.com/feed/update/urn:li:share:1/");
+  });
+});
+
+describe("título do documento no LinkedIn", () => {
+  it("sai sem os asteriscos de destaque", async () => {
+    const ctx = makeDeps({ now: () => new Date("2026-11-06T14:00:00Z") });
+    ctx.deps.drafter.draftCarousel = async () => sampleCarousel("Only **42%** of mobile sites have good TTFB");
+    const bot = new Bot(ctx.deps, perfil);
+    await bot.handleUpdate(msg("/start"));
+    await bot.handleUpdate(msg("/carrossel ttfb"));
+    await bot.handleUpdate(click("ca:1"));
+    await bot.publishCarousel();
+    expect(ctx.linkedin.published[0].title).toBe("Only 42% of mobile sites have good TTFB");
   });
 });
