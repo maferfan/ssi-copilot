@@ -38,13 +38,39 @@ function ddmm(d: Date): string {
   return `${String(b.getUTCDate()).padStart(2, "0")}/${String(b.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-/** Quando sai o próximo carrossel: hoje às 18h se for sexta antes das 18h; senão, a próxima sexta. */
-export function nextPublishLabel(now: Date): string {
+/** Data em Brasília, "AAAA-MM-DD". */
+export function brDate(d: Date): string {
+  return brt(d).toISOString().slice(0, 10);
+}
+
+function addDays(date: string, days: number): string {
+  return new Date(new Date(`${date}T12:00:00Z`).getTime() + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** Primeira sexta que ainda dá para publicar: hoje, se for sexta antes das 18h; senão, a próxima. */
+export function firstFriday(now: Date): string {
   const b = brt(now);
   const day = b.getUTCDay();
-  if (day === 5 && b.getUTCHours() < 18) return "hoje (sexta) às 18h";
-  const days = (5 - day + 7) % 7 || 7;
-  return `sexta, ${ddmm(new Date(now.getTime() + days * DAY_MS))}, às 18h`;
+  if (day === 5 && b.getUTCHours() < 18) return brDate(now);
+  return addDays(brDate(now), (5 - day + 7) % 7 || 7);
+}
+
+/** Próxima sexta sem carrossel agendado: se a primeira está ocupada, a seguinte, e assim por diante. */
+export function nextFreeFriday(now: Date, taken: (string | null)[]): string {
+  let date = firstFriday(now);
+  while (taken.includes(date)) date = addDays(date, 7);
+  return date;
+}
+
+/** "hoje (sexta) às 18h" ou "sexta, 13/11, às 18h". */
+export function fridayLabel(date: string, now: Date): string {
+  if (date === brDate(now)) return "hoje (sexta) às 18h";
+  return `sexta, ${date.slice(8, 10)}/${date.slice(5, 7)}, às 18h`;
+}
+
+/** Quando sairia um carrossel aprovado agora (respeitando a fila de sextas). */
+export function nextPublishLabel(now: Date, taken: (string | null)[] = []): string {
+  return fridayLabel(nextFreeFriday(now, taken), now);
 }
 
 const HELP = `<b>Como funciona</b>
@@ -57,7 +83,7 @@ const HELP = `<b>Como funciona</b>
 <b>Carrossel de sexta</b>
 1. Mande <code>/carrossel</code> e o tema, por exemplo: <code>/carrossel como escolher a stack de um site</code>
 2. Eu monto os slides e mando a prévia.
-3. Aprovado, ele é publicado na sexta às 18h.
+3. Aprovado, ele entra na próxima sexta livre, às 18h. Se a sexta já tiver um, vai para a seguinte.
 
 <b>Convites</b>
 Meta: ${WEEKLY_INVITE_GOAL} convites por semana. Mandou alguns? Registre com <code>/convites 10</code> (para corrigir, <code>/convites -2</code>). <code>/convites</code> sozinho mostra quantos faltam.
@@ -65,6 +91,7 @@ Meta: ${WEEKLY_INVITE_GOAL} convites por semana. Mandou alguns? Registre com <co
 <b>Resumo e painel</b>
 Domingo às 18h chega o resumo da semana e eu peço 3 números das Análises do LinkedIn (/metricas). Eles vão para o painel (/painel).
 
+/agenda — carrosséis agendados, por sexta
 /conectar — conectar o LinkedIn (vale por 2 meses)
 /agora — gerar as sugestões de comentário agora
 /fila — ver os posts salvos
@@ -135,11 +162,26 @@ ${esc(text)}
 }
 
 export function carouselCard(c: Carousel, when: string): string {
-  const slides = c.content.slides.map((s, i) => `${i + 1}. ${esc(s.titulo)}`).join("\n");
+  const slides = c.content.slides
+    .map((s, i) => {
+      const g = s.grafico;
+      const chart = !g ? "" : g.fonte ? ` · 📊 ${esc(g.fonte.nome)}${g.fonte.ano ? ` ${esc(g.fonte.ano)}` : ""}` : " · 📊 <i>ilustrativo</i>";
+      return `${i + 1}. ${esc(s.titulo.replace(/\*\*/g, ""))}${chart}`;
+    })
+    .join("\n");
+  const cg = c.content.capa_grafico;
+  const cover = cg ? `\nCapa · 📊 ${cg.fonte ? `${esc(cg.fonte.nome)}${cg.fonte.ano ? ` ${esc(cg.fonte.ano)}` : ""}` : "<i>ilustrativo</i>"}` : "\nCapa · ⚠️ <i>sem gráfico</i>";
+  const refs = c.content.referencias?.length ?? 0;
+  const sources = refs ? `\n🔗 ${refs === 1 ? "1 fonte conferida" : `${refs} fontes conferidas`}, listadas no slide final.` : "\n⚠️ <i>Nenhuma fonte conferida: todos os gráficos são ilustrativos.</i>";
+  const k = c.content.custo;
+  const cost = k
+    ? `\n💰 ${(k.inputTokens / 1000).toFixed(1)}k tokens de entrada, ${(k.outputTokens / 1000).toFixed(1)}k de saída, ${k.searches} ${k.searches === 1 ? "busca" : "buscas"} ≈ US$ ${k.usd.toFixed(2)}`
+    : "";
   return `🎠 <b>Carrossel</b> · ${esc(c.topic)}
 
-<b>${esc(c.content.titulo)}</b>
+<b>${esc(c.content.titulo.replace(/\*\*/g, ""))}</b>${cover}
 ${slides}
+${sources}${cost}
 
 <b>Legenda do post:</b>
 ${esc(c.content.legenda)}
@@ -250,6 +292,9 @@ export class Bot {
           return;
         case "conectar":
           await this.sendConnect(chatId);
+          return;
+        case "agenda":
+          await this.sendAgenda(chatId);
           return;
         case "carrossel":
           if (arg) await this.requestCarousel(chatId, arg);
@@ -508,7 +553,7 @@ export class Bot {
       if (previous && previous.status === "draft") await store.updateCarousel(previous.id, { status: "discarded" });
       const carousel = (await store.getCarousel(id))!;
       await messenger.sendPhotos(chatId, rendered.images);
-      await messenger.send(chatId, carouselCard(carousel, nextPublishLabel(this.deps.now())), carouselButtons(id));
+      await messenger.send(chatId, carouselCard(carousel, await this.nextSlotLabel()), carouselButtons(id));
     } catch (err) {
       await messenger.send(chatId, `⚠️ Não consegui montar o carrossel: ${esc(String((err as Error).message))}`);
     }
@@ -525,15 +570,16 @@ export class Bot {
       await messenger.answerCallback(callbackId, "Esse carrossel já foi decidido.");
       return;
     }
-    const when = nextPublishLabel(this.deps.now());
+    const when = await this.nextSlotLabel();
     switch (action) {
       case "ca": {
         await messenger.answerCallback(callbackId, "Agendado!");
-        const replaced = await store.listCarousels(["approved"]);
-        for (const old of replaced) await store.updateCarousel(old.id, { status: "discarded" });
-        await store.updateCarousel(id, { status: "approved" });
-        const note = replaced.length ? "\n<i>Ele substitui o carrossel que estava agendado antes.</i>" : "";
-        await messenger.edit(chatId, messageId, `${carouselCard(c, when)}\n\n✅ <b>Agendado: ${when}.</b>${note}`);
+        const queue = await store.listCarousels(["approved"]);
+        const slot = nextFreeFriday(this.deps.now(), queue.map((q) => q.scheduled_for));
+        await store.updateCarousel(id, { status: "approved", scheduled_for: slot });
+        const label = fridayLabel(slot, this.deps.now());
+        const note = queue.length ? `\n<i>${queue.length === 1 ? "Já há 1 carrossel" : `Já há ${queue.length} carrosséis`} na fila antes dele. Veja em /agenda.</i>` : "";
+        await messenger.edit(chatId, messageId, `${carouselCard(c, label)}\n\n✅ <b>Agendado: ${label}.</b>${note}`);
         return;
       }
       case "cr":
@@ -556,15 +602,37 @@ export class Bot {
     }
   }
 
-  /** Sexta, 18h: publica o carrossel aprovado. */
+  private async nextSlotLabel(): Promise<string> {
+    const queue = await this.deps.store.listCarousels(["approved"]);
+    return nextPublishLabel(this.deps.now(), queue.map((q) => q.scheduled_for));
+  }
+
+  /** /agenda: carrosséis aprovados, na ordem das sextas. */
+  private async sendAgenda(chatId: number) {
+    const queue = (await this.deps.store.listCarousels(["approved"])).sort((a, b) => (a.scheduled_for ?? "").localeCompare(b.scheduled_for ?? ""));
+    if (queue.length === 0) {
+      await this.deps.messenger.send(chatId, "📅 Nenhum carrossel agendado. Mande <code>/carrossel</code> e o tema.");
+      return;
+    }
+    const lines = queue.map((q) => `• ${q.scheduled_for ? fridayLabel(q.scheduled_for, this.deps.now()) : "próxima sexta"} — ${esc(q.content.titulo.replace(/\*\*/g, ""))}`);
+    await this.deps.messenger.send(chatId, `📅 <b>Carrosséis agendados</b>\n\n${lines.join("\n")}\n\n<i>Para tirar um da fila, toque em ❌ Descartar no cartão dele.</i>`);
+  }
+
+  /** Sexta, 18h: publica o carrossel agendado para hoje. */
   async publishCarousel(): Promise<void> {
     const { store, messenger, renderer, linkedin } = this.deps;
     const chatId = await this.ownerChat();
     if (chatId === null) return;
-    const approved = await store.listCarousels(["approved"]);
-    const c = approved.at(-1);
+    // Sai o agendado para hoje (ou um atrasado, se uma sexta passou sem publicar); os outros esperam a vez
+    const today = brDate(this.deps.now());
+    const queue = await store.listCarousels(["approved"]);
+    const c = queue
+      .filter((q) => !q.scheduled_for || q.scheduled_for <= today)
+      .sort((a, b) => (a.scheduled_for ?? "").localeCompare(b.scheduled_for ?? ""))[0];
     if (!c) {
-      await messenger.send(chatId, "🎠 Sexta, 18h: não havia carrossel aprovado, então nada foi publicado esta semana.");
+      const next = queue.filter((q) => q.scheduled_for).sort((a, b) => a.scheduled_for!.localeCompare(b.scheduled_for!))[0];
+      const tail = next ? ` O próximo sai ${fridayLabel(next.scheduled_for!, this.deps.now())}.` : "";
+      await messenger.send(chatId, `🎠 Sexta, 18h: não havia carrossel agendado para hoje, então nada foi publicado.${tail}`);
       return;
     }
 
@@ -594,7 +662,9 @@ export class Bot {
   async remindCarousel(): Promise<void> {
     const chatId = await this.ownerChat();
     if (chatId === null) return;
-    if ((await this.deps.store.listCarousels(["approved"])).length) return;
+    const tomorrow = addDays(brDate(this.deps.now()), 1);
+    const queue = await this.deps.store.listCarousels(["approved"]);
+    if (queue.some((q) => !q.scheduled_for || q.scheduled_for <= tomorrow)) return;
     await this.deps.messenger.send(
       chatId,
       "📅 Amanhã às 18h sai o carrossel da semana, mas nenhum está aprovado ainda.\nQual o tema? Mande <code>/carrossel</code> e o tema.",

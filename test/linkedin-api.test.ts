@@ -157,15 +157,16 @@ describe("LinkedInGateway", () => {
 });
 
 describe("carrossel: formato e HTML", () => {
-  it("normaliza: corta em 8 slides e rejeita carrossel incompleto", () => {
+  it("normaliza: no máximo 3 slides de conteúdo (5 no total) e rejeita carrossel incompleto", () => {
     const many = { ...sampleCarousel(), slides: Array.from({ length: 12 }, (_, i) => ({ titulo: `S${i}`, texto: "x" })) };
-    expect(normalizeCarousel(many).slides).toHaveLength(8);
+    expect(normalizeCarousel(many).slides).toHaveLength(3);
+    expect(normalizeCarousel({ ...sampleCarousel(), slides: [{ titulo: "Só um", texto: "" }] }).slides).toHaveLength(1);
     expect(() => normalizeCarousel({ ...sampleCarousel(), slides: [] })).toThrow("incompleto");
   });
 
   it("gera um slide por página, numerado, com o texto escapado", () => {
     const html = carouselHtml({ ...sampleCarousel("Use <div> & **flex**") });
-    expect(html.match(/<section class="slide/g)).toHaveLength(5);
+    expect(html.match(/<section class="slide/g)).toHaveLength(5); // capa + 3 + fechamento
     expect(html).toContain("01 / 05");
     expect(html).toContain('Use &lt;div&gt; &amp; <em class="hl">flex</em>');
   });

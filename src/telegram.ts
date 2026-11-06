@@ -102,7 +102,8 @@ export class TelegramMessenger implements Messenger {
     return this.call<boolean>("setMyCommands", {
       commands: [
         { command: "agora", description: "Gerar as sugestões de comentário agora" },
-        { command: "carrossel", description: "Criar o carrossel de sexta: /carrossel <tema>" },
+        { command: "carrossel", description: "Criar um carrossel: /carrossel <tema>" },
+        { command: "agenda", description: "Carrosséis agendados, por sexta" },
         { command: "conectar", description: "Conectar ou ver a conexão com o LinkedIn" },
         { command: "fila", description: "Ver os posts salvos" },
         { command: "semana", description: "Resumo da semana" },

@@ -52,7 +52,7 @@ export class MemoryStore implements Store {
   }
   async addCarousel(c: { topic: string; content: CarouselContent; createdAt: string }) {
     const id = this.carousels.length + 1;
-    this.carousels.push({ id, topic: c.topic, content: c.content, status: "draft", created_at: c.createdAt, published_at: null, post_url: null });
+    this.carousels.push({ id, topic: c.topic, content: c.content, status: "draft", created_at: c.createdAt, published_at: null, post_url: null, scheduled_for: null });
     return id;
   }
   async getCarousel(id: number) {

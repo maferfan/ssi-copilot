@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Perfil } from "./perfil";
 import { normalizeCarousel } from "./carousel";
 import { detectLanguage } from "./language";
-import type { CarouselContent, Drafter, Post } from "./types";
+import type { CarouselChart, CarouselContent, CarouselCost, Drafter, Post } from "./types";
 
 export const MODEL = "claude-sonnet-5-5";
 
@@ -41,37 +41,150 @@ ${post.text ?? ""}
 Escreva um comentário para este post. ${idioma}${outras}`;
 }
 
-export function carouselSystemPrompt(p: Perfil): string {
-  return `Você escreve carrosséis (posts em slides) para o LinkedIn de ${p.nome}.
+// ---------- carrossel: pesquisa com fontes + escrita em inglês ----------
 
-Sobre ${p.nome}: ${p.resumo}
-Objetivo: ${p.objetivo}
-
-Como um bom carrossel funciona:
-- A capa promete um ganho concreto para quem ler. Título curto (até 8 palavras), subtítulo de uma linha.
-- De 5 a 8 slides no meio, um por ideia. Título de até 7 palavras, texto de até 40 palavras.
-- Conteúdo prático e específico: exemplos, passos, erros comuns, números só quando forem conhecidos de verdade.
-- O último slide fecha com uma conclusão e convida a comentar ou seguir.
-- Destaque no máximo um trecho por slide com **asteriscos duplos**.
-- A legenda do post tem de 3 a 6 linhas: um gancho na primeira linha, o porquê do tema, uma pergunta no fim e até 3 hashtags.
-- Escreva em português do Brasil, no tom de ${p.nome}: ${p.tom.join(" ")}`;
+/** Dado encontrado na pesquisa. Os números do gráfico vêm daqui, nunca do texto escrito depois. */
+export interface ResearchItem {
+  id: string;
+  fonte: string;
+  ano: string;
+  url: string;
+  achado: string;
+  tipo: "bar" | "line";
+  unidade: string;
+  dados: { label: string; valor: number }[];
 }
+
+/** Preços do Claude Sonnet 5.5 (US$ por milhão de tokens) e da busca na web (por busca). */
+export const PRICE = { input: 2 / 1e6, output: 10 / 1e6, search: 10 / 1000 };
+
+export function costOf(usage: { input: number; output: number; searches: number }): CarouselCost {
+  const usd = usage.input * PRICE.input + usage.output * PRICE.output + usage.searches * PRICE.search;
+  return { inputTokens: usage.input, outputTokens: usage.output, searches: usage.searches, usd: Math.round(usd * 1000) / 1000 };
+}
+
+/** "https://www.Site.com/a/b/?utm=x#y" → "site.com/a/b" (para comparar links). */
+export function urlKey(url: string): string | null {
+  try {
+    const u = new URL(url);
+    return `${u.hostname.toLowerCase().replace(/^www\./, "")}${u.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Links que vieram dos resultados da busca (e das citações), nunca do texto livre do modelo. */
+export function searchedUrls(content: unknown[]): Set<string> {
+  const urls = new Set<string>();
+  const grab = (v: unknown) => {
+    for (const m of JSON.stringify(v ?? null).matchAll(/https?:\/\/[^\s"'<>\\]+/g)) {
+      const k = urlKey(m[0]);
+      if (k) urls.add(k);
+    }
+  };
+  for (const block of content as { type?: string; citations?: unknown }[]) {
+    if (block?.type === "text") grab(block.citations);
+    else grab(block);
+  }
+  return urls;
+}
+
+/** Fica só com dados cujo link apareceu na busca e que dão um gráfico (2 a 8 números). */
+export function verifyResearch(items: ResearchItem[], seen: Set<string>): ResearchItem[] {
+  return items.filter((it) => {
+    const key = it?.url ? urlKey(it.url) : null;
+    const dados = Array.isArray(it?.dados) ? it.dados.filter((d) => Number.isFinite(Number(d?.valor)) && String(d?.label ?? "").trim()) : [];
+    return Boolean(key && seen.has(key) && it.fonte?.trim() && dados.length >= 2 && dados.length <= 8);
+  });
+}
+
+/** Primeiro array JSON do texto (a resposta com busca vem em texto livre). */
+export function parseJsonArray<T>(text: string): T[] {
+  const start = text.indexOf("[");
+  const end = text.lastIndexOf("]");
+  if (start < 0 || end <= start) return [];
+  try {
+    const data = JSON.parse(text.slice(start, end + 1));
+    return Array.isArray(data) ? (data as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function researchPrompt(topic: string): string {
+  return `Topic for a LinkedIn carousel aimed at developers and tech recruiters: ${topic}
+
+Search the web and collect 3 to 6 quantitative data points that support this topic, from reputable primary sources (developer surveys such as Stack Overflow Developer Survey, State of JS/CSS, JetBrains; HTTP Archive Web Almanac; web.dev / Chrome UX Report; GitHub Octoverse; official statistics; peer-reviewed or well-known industry reports). Prefer data from the last 3 years.
+
+Rules:
+- Copy the numbers exactly as published. Do not estimate, round differently, combine or invent values.
+- Each data point must be chart-ready: 2 to 8 labelled numbers (e.g. percentages per answer, or a value per year).
+- "url" must be the page where the number is published.
+- Use "line" only for values over time; otherwise "bar".
+
+Reply at the end with ONLY a JSON array, no text before or after:
+[{"id": "R1", "fonte": "publisher or report name", "ano": "2025", "url": "https://...", "achado": "one-sentence finding", "tipo": "bar" | "line", "unidade": "%" or "ms" or "" , "dados": [{"label": "...", "valor": 42}]}]`;
+}
+
+export function carouselSystemPrompt(p: Perfil): string {
+  return `You write LinkedIn carousels (slide posts) for ${p.nome}, always in English.
+
+About ${p.nome}: ${p.resumo}
+Goal: ${p.objetivo}
+
+What a good carousel looks like:
+- Short carousels: 3 to 5 slides in total = cover + 1 to 3 content slides + closing. Prefer 1 content slide (3 slides total); use more only if the topic truly needs it.
+- The cover (slide 1) ALWAYS has a chart ("grafico_capa"): the strongest data point, used as the hook. Short title (up to 8 words) that the chart backs up, one-line subtitle.
+- Content slides: one idea each. Title up to 7 words. Text up to 40 words, or up to 28 words on a slide with a chart.
+- At most 3 charts in total, counting the cover. Content slides without a chart use mode "none" (text only).
+  - mode "research": use a research item that fits (by its id). Its numbers are inserted automatically; do not repeat them in "dados". Prefer this whenever a research item fits.
+  - mode "illustrative": only if no research item fits any slide, so the carousel still has a chart. Use a conceptual comparison with obviously relative values (e.g. effort vs impact on a 1-10 scale). It is labelled "Illustrative" on the slide. Never present illustrative values as facts in the text.
+- Only state numbers in the text that come from a research item you are using on that slide.
+- The last slide wraps up and invites people to comment or follow.
+- Highlight at most one phrase per slide with **double asterisks**.
+- The post caption has 3 to 6 lines: a hook in the first line, why it matters, a question at the end, "Sources in the last slides." and up to 3 hashtags.
+- Practical, specific, no fluff. Tone: ${p.tom.join(" ")}`;
+}
+
+const CHART_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["modo", "id_pesquisa", "tipo", "titulo", "unidade", "dados"],
+  properties: {
+    modo: { type: "string", enum: ["research", "illustrative", "none"], description: "none = text-only slide" },
+    id_pesquisa: { type: "string", description: "Research item id (mode research); empty otherwise" },
+    tipo: { type: "string", enum: ["bar", "line"] },
+    titulo: { type: "string", description: "Short chart title" },
+    unidade: { type: "string", description: "Unit, e.g. % or ms; empty if none" },
+    dados: {
+      type: "array",
+      description: "Only for illustrative charts (2 to 6 points); empty otherwise",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["label", "valor"],
+        properties: { label: { type: "string" }, valor: { type: "number" } },
+      },
+    },
+  },
+} as const;
 
 const CAROUSEL_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["titulo", "subtitulo", "slides", "fechamento", "legenda"],
+  required: ["titulo", "subtitulo", "grafico_capa", "slides", "fechamento", "legenda"],
   properties: {
-    titulo: { type: "string", description: "Título da capa" },
-    subtitulo: { type: "string", description: "Uma linha abaixo do título da capa" },
+    titulo: { type: "string", description: "Cover title" },
+    subtitulo: { type: "string", description: "One line under the cover title" },
+    grafico_capa: { ...CHART_SCHEMA, description: "Cover chart (always present: research or illustrative, never none)" },
     slides: {
       type: "array",
-      description: "De 5 a 8 slides de conteúdo",
+      description: "1 to 3 content slides (prefer 1); charts optional, at most 2 here",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["titulo", "texto"],
-        properties: { titulo: { type: "string" }, texto: { type: "string" } },
+        required: ["titulo", "texto", "grafico"],
+        properties: { titulo: { type: "string" }, texto: { type: "string" }, grafico: CHART_SCHEMA },
       },
     },
     fechamento: {
@@ -80,33 +193,73 @@ const CAROUSEL_SCHEMA = {
       required: ["titulo", "texto"],
       properties: { titulo: { type: "string" }, texto: { type: "string" } },
     },
-    legenda: { type: "string", description: "Texto do post que acompanha o carrossel" },
+    legenda: { type: "string", description: "Post caption" },
   },
 } as const;
 
-export function carouselUserPrompt(topic: string, previous?: CarouselContent, instructions?: string): string {
-  if (previous && instructions) {
-    return `Tema: ${topic}
+interface DraftChart {
+  modo: "research" | "illustrative" | "none";
+  id_pesquisa: string;
+  tipo: "bar" | "line";
+  titulo: string;
+  unidade: string;
+  dados: { label: string; valor: number }[];
+}
 
-Versão atual do carrossel:
-${JSON.stringify(previous, null, 2)}
-
-Ajuste pedido pelo autor:
-<ajuste>
-${instructions}
-</ajuste>
-
-Devolva o carrossel completo com o ajuste aplicado, mantendo o que não foi pedido para mudar.`;
+/** Monta o gráfico final: com fonte, os números saem da pesquisa conferida; senão, vira ilustrativo. */
+export function buildChart(d: DraftChart | undefined, research: ResearchItem[]): CarouselChart | undefined {
+  if (!d || d.modo === "none") return undefined;
+  const item = d.modo === "research" ? research.find((r) => r.id === d.id_pesquisa) : undefined;
+  if (item) {
+    return {
+      tipo: item.tipo === "line" ? "line" : "bar",
+      titulo: d.titulo || item.achado,
+      unidade: item.unidade ?? "",
+      dados: item.dados.map((x) => ({ label: String(x.label), valor: Number(x.valor) })),
+      fonte: { nome: item.fonte, url: item.url, ano: item.ano ?? "" },
+      ilustrativo: false,
+    };
   }
-  if (previous) {
-    return `Tema: ${topic}
+  if (!Array.isArray(d.dados) || d.dados.length < 2) return undefined;
+  return { tipo: d.tipo, titulo: d.titulo, unidade: d.unidade, dados: d.dados, fonte: null, ilustrativo: true };
+}
 
-Já existe esta versão, mas o autor pediu outra completamente diferente (outro ângulo, outros exemplos):
-${JSON.stringify(previous, null, 2)}`;
+type ContentSlide = { titulo: string; texto: string; grafico?: CarouselChart };
+
+/**
+ * A capa sempre tem gráfico: se o modelo não pôs, sobe o primeiro gráfico dos slides;
+ * se nenhum slide tem, usa o primeiro dado conferido da pesquisa.
+ */
+export function ensureCoverChart(cover: CarouselChart | undefined, slides: ContentSlide[], research: ResearchItem[]) {
+  if (cover) return { cover, slides };
+  const idx = slides.findIndex((s) => s.grafico);
+  if (idx >= 0) {
+    const moved = slides[idx].grafico;
+    return { cover: moved, slides: slides.map((s, i) => (i === idx ? { titulo: s.titulo, texto: s.texto } : s)) };
   }
-  return `Tema: ${topic}
+  const first = research[0];
+  const fromResearch = first ? buildChart({ modo: "research", id_pesquisa: first.id, tipo: first.tipo, titulo: first.achado, unidade: "", dados: [] }, research) : undefined;
+  return { cover: fromResearch, slides };
+}
 
-Escreva o carrossel.`;
+/** Pesquisa já conferida de uma versão anterior, para ajustes não pagarem nova busca. */
+export function researchFromCarousel(c: CarouselContent): ResearchItem[] {
+  return [c.capa_grafico, ...c.slides.map((s) => s.grafico)].flatMap((g, i) =>
+    g?.fonte ? [{ id: `R${i + 1}`, fonte: g.fonte.nome, ano: g.fonte.ano, url: g.fonte.url, achado: g.titulo, tipo: g.tipo, unidade: g.unidade, dados: g.dados }] : [],
+  );
+}
+
+export function carouselUserPrompt(topic: string, research: ResearchItem[], previous?: CarouselContent, instructions?: string): string {
+  const data = research.length
+    ? `Research items (verified sources):\n${JSON.stringify(research, null, 2)}`
+    : "No verified research items were found: use illustrative charts only, and state no numbers as facts.";
+  const prev = previous ? `\n\nCurrent version:\n${JSON.stringify({ ...previous, custo: undefined }, null, 2)}` : "";
+  const ask = instructions
+    ? `\n\nChange requested by the author (keep everything else):\n<ajuste>\n${instructions}\n</ajuste>`
+    : previous
+      ? "\n\nThe author wants a completely different version (new angle, new examples)."
+      : "";
+  return `Topic: ${topic}\n\n${data}${prev}${ask}\n\nWrite the carousel in English.`;
 }
 
 export class ClaudeDrafter implements Drafter {
@@ -138,7 +291,43 @@ export class ClaudeDrafter implements Drafter {
     return text.replace(/^["“]|["”]$/g, "").trim();
   }
 
+  /** Passo 1: busca na web e devolve só os dados cujo link apareceu nos resultados. */
+  private async research(topic: string): Promise<{ items: ResearchItem[]; input: number; output: number; searches: number }> {
+    const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: researchPrompt(topic) }];
+    const content: unknown[] = [];
+    let input = 0;
+    let output = 0;
+    let searches = 0;
+    for (let turn = 0; turn < 4; turn++) {
+      const response = await this.client.beta.messages.create({
+        model: MODEL,
+        max_tokens: 16000,
+        betas: ["server-side-fallback-2026-07-01"],
+        fallbacks: "default",
+        output_config: { effort: "medium" },
+        tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 6 }],
+        messages,
+      });
+      input += response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0);
+      output += response.usage.output_tokens;
+      searches += response.usage.server_tool_use?.web_search_requests ?? 0;
+      content.push(...response.content);
+      if (response.stop_reason === "pause_turn") {
+        messages.push({ role: "assistant", content: response.content });
+        continue;
+      }
+      if (response.stop_reason === "refusal") throw new Error("A pesquisa sobre esse tema foi recusada.");
+      const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+      const items = verifyResearch(parseJsonArray<ResearchItem>(text), searchedUrls(content));
+      return { items, input, output, searches };
+    }
+    throw new Error("A pesquisa não terminou.");
+  }
+
   async draftCarousel(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent> {
+    // Ajuste reaproveita as fontes já conferidas; tema novo ou "refazer" pesquisa de novo
+    const research = previous && instructions ? { items: researchFromCarousel(previous), input: 0, output: 0, searches: 0 } : await this.research(topic);
+
     const response = await this.client.beta.messages.create({
       model: MODEL,
       max_tokens: 16000,
@@ -146,12 +335,28 @@ export class ClaudeDrafter implements Drafter {
       fallbacks: "default",
       output_config: { effort: "high", format: { type: "json_schema", schema: CAROUSEL_SCHEMA } },
       system: carouselSystemPrompt(this.perfil),
-      messages: [{ role: "user", content: carouselUserPrompt(topic, previous, instructions) }],
+      messages: [{ role: "user", content: carouselUserPrompt(topic, research.items, previous, instructions) }],
     });
 
     if (response.stop_reason === "refusal") throw new Error("O Claude não quis escrever sobre esse tema.");
     if (response.stop_reason === "max_tokens") throw new Error("O carrossel ficou longo demais. Tente um tema mais específico.");
     const json = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
-    return normalizeCarousel(JSON.parse(json) as CarouselContent);
+    const draft = JSON.parse(json) as Omit<CarouselContent, "slides" | "capa_grafico"> & {
+      grafico_capa?: DraftChart;
+      slides: { titulo: string; texto: string; grafico?: DraftChart }[];
+    };
+    const custo = costOf({
+      input: research.input + response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0),
+      output: research.output + response.usage.output_tokens,
+      searches: research.searches,
+    });
+    const { cover, slides } = ensureCoverChart(
+      buildChart(draft.grafico_capa, research.items),
+      draft.slides.map((s) => ({ titulo: s.titulo, texto: s.texto, grafico: buildChart(s.grafico, research.items) })),
+      research.items,
+    );
+    const { grafico_capa: _ignored, ...rest } = draft;
+    return normalizeCarousel({ ...rest, capa_grafico: cover, slides, custo });
   }
+
 }

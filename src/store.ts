@@ -72,7 +72,7 @@ export class D1Store implements Store {
     return row ? toCarousel(row) : null;
   }
 
-  async updateCarousel(id: number, patch: Partial<Pick<Carousel, "status" | "published_at" | "post_url">>) {
+  async updateCarousel(id: number, patch: Partial<Pick<Carousel, "status" | "published_at" | "post_url" | "scheduled_for">>) {
     const keys = Object.keys(patch) as (keyof typeof patch)[];
     if (keys.length === 0) return;
     await this.db
