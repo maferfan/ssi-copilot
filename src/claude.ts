@@ -2,8 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Perfil } from "./perfil";
 import { normalizeCarousel } from "./carousel";
 import { detectLanguage } from "./language";
-import { parseJsonArray } from "./recruiters";
-import type { CarouselContent, Drafter, Post, RecruiterCandidate } from "./types";
+import type { CarouselContent, Drafter, Post } from "./types";
 
 export const MODEL = "claude-sonnet-5-5";
 
@@ -110,27 +109,6 @@ ${JSON.stringify(previous, null, 2)}`;
 Escreva o carrossel.`;
 }
 
-export function recruiterSearchPrompt(p: Perfil, exclude: string[], want: number): string {
-  const skip = exclude.length ? `\n\nJá sugeridos antes (não repita):\n${exclude.slice(-300).join("\n")}` : "";
-  return `Encontre perfis públicos do LinkedIn de recrutadores de tecnologia para ${p.nome} se conectar.
-
-Sobre ${p.nome}: ${p.resumo}
-Objetivo: ${p.objetivo}
-
-Quem buscar (metade Brasil, metade internacional):
-- Brasil: tech recruiter, recrutadora de TI, talent acquisition, headhunter de tecnologia, em empresas de tecnologia, consultorias e agências.
-- Internacional: technical recruiter, tech talent acquisition que contrata desenvolvedores remotos (LATAM, Europa, EUA, remote-first).
-- Só pessoas (perfis linkedin.com/in/...), nunca páginas de empresa ou vagas.
-- Prefira quem recruta desenvolvedores web, front-end ou full-stack.
-
-Faça várias buscas diferentes (em português e em inglês) até juntar ${want} perfis distintos.
-
-Para cada perfil, diga o idioma em que a pessoa escreve no LinkedIn (pelo título e pelo resumo do resultado): "pt" para português, "en" para inglês, "other" para qualquer outro idioma.
-
-Responda no fim SOMENTE com um array JSON, sem texto antes ou depois:
-[{"name": "Nome Sobrenome", "headline": "título do perfil", "url": "https://www.linkedin.com/in/...", "language": "pt" | "en" | "other"}]${skip}`;
-}
-
 export class ClaudeDrafter implements Drafter {
   private client: Anthropic;
 
@@ -175,30 +153,5 @@ export class ClaudeDrafter implements Drafter {
     if (response.stop_reason === "max_tokens") throw new Error("O carrossel ficou longo demais. Tente um tema mais específico.");
     const json = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
     return normalizeCarousel(JSON.parse(json) as CarouselContent);
-  }
-
-  /** Busca na web (só linkedin.com) com a ferramenta de busca do próprio Claude. */
-  async findRecruiters(exclude: string[], want: number): Promise<RecruiterCandidate[]> {
-    const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: recruiterSearchPrompt(this.perfil, exclude, want) }];
-    // A busca pode pausar no meio (pause_turn): devolvemos a resposta para ela continuar
-    for (let turn = 0; turn < 4; turn++) {
-      const response = await this.client.beta.messages.create({
-        model: MODEL,
-        max_tokens: 16000,
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
-        output_config: { effort: "medium" },
-        tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 12, allowed_domains: ["linkedin.com"] }],
-        messages,
-      });
-      if (response.stop_reason === "pause_turn") {
-        messages.push({ role: "assistant", content: response.content });
-        continue;
-      }
-      if (response.stop_reason === "refusal") throw new Error("A busca de recrutadores foi recusada.");
-      const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
-      return parseJsonArray<RecruiterCandidate>(text);
-    }
-    throw new Error("A busca de recrutadores não terminou.");
   }
 }

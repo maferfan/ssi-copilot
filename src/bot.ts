@@ -2,12 +2,14 @@ import { detectLanguage } from "./language";
 import { extractLinkedInUrl, extractPostUrn, textAroundUrl } from "./linkedin";
 import type { Perfil } from "./perfil";
 import type { TgUpdate } from "./telegram";
-import type { Awaiting, Carousel, CarouselContent, Deps, InlineButton, Job, LinkedInConnection, Post, Recruiter, WeeklyMetrics } from "./types";
-import { BATCH_SIZE, connectionNote, NOTES_PER_WEEK, selectCandidates, WEEKLY_RECRUITERS } from "./recruiters";
+import type { Awaiting, Carousel, CarouselContent, Deps, InlineButton, Job, LinkedInConnection, Post, WeeklyMetrics } from "./types";
 import { shiftWeek, weekKey, weekLabel, weekStartInstant } from "./week";
 
 /** Quantos posts no máximo viram sugestão a cada rodada das 18h. */
 export const DAILY_LIMIT = 3;
+
+/** Meta semanal de convites. O LinkedIn limita em torno de 100 por semana. */
+export const WEEKLY_INVITE_GOAL = 50;
 
 const BRT_OFFSET_MS = 3 * 3600 * 1000; // Brasília = UTC-3, sem horário de verão
 const DAY_MS = 24 * 3600 * 1000;
@@ -57,8 +59,8 @@ const HELP = `<b>Como funciona</b>
 2. Eu monto os slides e mando a prévia.
 3. Aprovado, ele é publicado na sexta às 18h.
 
-<b>Recrutadores de domingo</b>
-Domingo às 8h chega uma lista de ${WEEKLY_RECRUITERS} recrutadores (Brasil e internacional, só perfis em português ou inglês), em blocos de ${BATCH_SIZE}. Você abre cada link e toca em Conectar; os ${NOTES_PER_WEEK} primeiros vêm com nota pronta. Depois toque em ✔️ Enviei.
+<b>Convites</b>
+Meta: ${WEEKLY_INVITE_GOAL} convites por semana. Mandou alguns? Registre com <code>/convites 10</code> (para corrigir, <code>/convites -2</code>). <code>/convites</code> sozinho mostra quantos faltam.
 
 <b>Resumo e painel</b>
 Domingo às 18h chega o resumo da semana e eu peço 3 números das Análises do LinkedIn (/metricas). Eles vão para o painel (/painel).
@@ -69,7 +71,15 @@ Domingo às 18h chega o resumo da semana e eu peço 3 números das Análises do 
 /semana — resumo da semana
 /metricas — registrar os números da semana
 /painel — link do dashboard
-/recrutadores — gerar a lista de recrutadores agora`;
+/convites — registrar convites e ver quantos faltam`;
+
+/** "/convites 12", "+12" ou "-3" → 12, 12, -3. */
+export function parseInviteCount(text: string): number | null {
+  const m = text.trim().match(/^([+-]?)\s*(\d{1,3})$/);
+  if (!m) return null;
+  const n = Number(m[2]);
+  return m[1] === "-" ? -n : n;
+}
 
 /** "120 3.400 215" → [120, 3400, 215]. Pontos e vírgulas são separadores de milhar. */
 export function parseMetrics(text: string): [number, number, number] | null {
@@ -83,16 +93,6 @@ const METRICS_HOWTO = `Abra o seu perfil no LinkedIn → <b>Análises</b> e me m
 3. <b>Seguidores</b> (total)
 
 Exemplo: <code>120 3400 215</code>`;
-
-export function recruiterBlock(rows: Recruiter[], index: number, total: number | null, offset: number): string {
-  const lines = rows.map((r, i) => {
-    const flag = r.language === "pt" ? "🇧🇷" : "🌎";
-    const headline = r.headline ? `\n   <i>${esc(r.headline.slice(0, 90))}</i>` : "";
-    const note = r.note ? `\n   📝 <code>${esc(r.note)}</code>` : "";
-    return `${offset + i + 1}. <a href="${esc(r.url)}">${esc(r.name)}</a> ${flag}${headline}${note}`;
-  });
-  return `🤝 <b>Bloco ${index}${total ? `/${total}` : ""}</b>\n\n${lines.join("\n\n")}`;
-}
 
 export function draftCard(post: Post, index?: { i: number; total: number }): string {
   const head = index ? `📝 <b>Post ${index.i}/${index.total}</b>` : "📝 <b>Post</b>";
@@ -233,9 +233,17 @@ export class Bot {
           }
           return;
         }
-        case "recrutadores":
-          await this.schedule({ kind: "invites" }, "🔎 Vou procurar recrutadores no LinkedIn (Brasil e internacional). A lista chega em 2–3 minutos.");
+        case "convites": {
+          if (!arg) {
+            await this.setAwaiting({ type: "invites" });
+            await messenger.send(chatId, `${await this.invitesLine()}\n\nQuantos convites você mandou agora? Responda só com o número (ex.: <code>10</code>).`);
+            return;
+          }
+          const n = parseInviteCount(arg);
+          if (n === null) await messenger.send(chatId, "Mande só o número, por exemplo: <code>/convites 10</code> (ou <code>/convites -2</code> para corrigir).");
+          else await this.addInvites(chatId, n);
           return;
+        }
         case "painel":
         case "dashboard":
           await messenger.send(chatId, `📊 Painel: ${esc(await this.dashboardUrl())}`);
@@ -290,6 +298,14 @@ export class Bot {
         case "carousel_adjust": {
           const prev = await store.getCarousel(awaiting.carouselId);
           if (prev) await this.requestCarousel(chatId, prev.topic, prev.id, text);
+          return;
+        }
+        case "invites": {
+          const n = parseInviteCount(text);
+          if (n === null) {
+            await this.setAwaiting(awaiting);
+            await messenger.send(chatId, "Não entendi. Responda só com o número de convites (ex.: <code>10</code>).");
+          } else await this.addInvites(chatId, n);
           return;
         }
         case "metrics": {
@@ -362,7 +378,8 @@ export class Bot {
     const week = weekKey(this.deps.now());
     const prevWeek = shiftWeek(week, -1);
     const actions = await store.listActionsSince(weekStartInstant(prevWeek).toISOString());
-    const count = (w: string, type: string) => actions.filter((a) => a.type === type && weekKey(new Date(a.created_at)) === w).length;
+    const count = (w: string, type: string) =>
+      actions.filter((a) => a.type === type && weekKey(new Date(a.created_at)) === w).reduce((sum, a) => sum + (a.value ?? 1), 0);
     const line = (icon: string, label: string, type: string) => {
       const cur = count(week, type);
       const diff = cur - count(prevWeek, type);
@@ -372,7 +389,7 @@ export class Bot {
     const metrics = (await store.listMetrics(week)).find((m) => m.week === week);
     const parts = [
       `📊 <b>Semana de ${weekLabel(week)}</b>`,
-      [line("💬", "Comentários", "comment"), line("🎠", "Carrosséis", "post"), line("🤝", "Convites", "invite")].join("\n"),
+      [line("💬", "Comentários", "comment"), line("🎠", "Carrosséis", "post"), this.goalLine(count(week, "invite"))].join("\n"),
     ];
     if (metrics) parts.push(this.metricsLine(metrics));
     parts.push(`Painel: ${esc(await this.dashboardUrl())}`);
@@ -469,8 +486,6 @@ export class Bot {
     switch (job.kind) {
       case "daily":
         return this.runDaily();
-      case "invites":
-        return this.runInvites();
       case "carousel": {
         const prev = job.previousId ? await this.deps.store.getCarousel(job.previousId) : null;
         return this.createCarousel(job.chatId, job.topic, prev ?? undefined, job.instructions);
@@ -586,101 +601,41 @@ export class Bot {
     );
   }
 
-  // ---------- recrutadores ----------
+  // ---------- convites ----------
 
-  /** Domingo, 8h: busca perfis novos e manda em blocos de 10, cada um com o botão "Enviei". */
-  async runInvites(): Promise<void> {
-    const { store, messenger, drafter } = this.deps;
-    const chatId = await this.ownerChat();
-    if (chatId === null) return;
-
-    let picked;
-    try {
-      const known = await store.knownRecruiterUrls();
-      picked = selectCandidates(await drafter.findRecruiters(known, WEEKLY_RECRUITERS + 15), known, WEEKLY_RECRUITERS);
-    } catch (err) {
-      await messenger.send(chatId, `⚠️ Não consegui buscar recrutadores: ${esc(String((err as Error).message))}`);
-      return;
-    }
-    if (picked.length === 0) {
-      await messenger.send(chatId, "Não achei perfis novos desta vez. Tente /recrutadores mais tarde.");
-      return;
-    }
-
+  /** Convites da semana atual (segunda a domingo). */
+  private async invitesThisWeek(): Promise<number> {
     const week = weekKey(this.deps.now());
-    // Se a lista já rodou nesta semana, os blocos novos continuam a numeração
-    let first = 1;
-    while ((await store.listRecruiterBatch(week, first)).length) first++;
-    const rows = picked.map((c, i) => ({
-      url: c.url,
-      name: c.name,
-      headline: c.headline || null,
-      language: c.language,
-      note: i < NOTES_PER_WEEK ? connectionNote(c.name, c.language) : null,
-      week,
-      batch: first + Math.floor(i / BATCH_SIZE),
-      created_at: this.iso(),
-    }));
-    await store.addRecruiters(rows);
-
-    const pt = picked.filter((c) => c.language === "pt").length;
-    const total = Math.ceil(rows.length / BATCH_SIZE);
-    await messenger.send(
-      chatId,
-      `🤝 <b>${rows.length} recrutadores para hoje</b> (${pt} 🇧🇷 · ${rows.length - pt} 🌎)
-
-1. Abra cada link e toque em <b>Conectar</b>.
-2. Nos ${Math.min(NOTES_PER_WEEK, rows.length)} primeiros, toque em <b>Adicionar nota</b> e cole a nota (o LinkedIn gratuito libera poucas por mês).
-3. No fim de cada bloco, toque em <b>✔️ Enviei</b> para contar no resumo.
-
-💻 No computador, o botão <b>🗂️ Abrir os 10</b> abre uma página que coloca os perfis em abas com um clique.`,
-    );
-    for (let b = 0; b < total; b++) {
-      const batch = await store.listRecruiterBatch(week, first + b);
-      const buttons: InlineButton[][] = [[{ text: `✔️ Enviei estes ${batch.length}`, data: `iv:${week}:${first + b}` }]];
-      const link = await this.invitesPageUrl(week, first + b);
-      if (link) buttons.unshift([{ text: `🗂️ Abrir os ${batch.length} no computador`, url: link }]);
-      await messenger.send(chatId, recruiterBlock(batch, b + 1, total, b * BATCH_SIZE), buttons);
-    }
+    const actions = await this.deps.store.listActionsSince(weekStartInstant(week).toISOString());
+    return actions.filter((a) => a.type === "invite").reduce((sum, a) => sum + (a.value ?? 1), 0);
   }
 
-  /** Link assinado da página do bloco (abre os perfis em abas). */
-  async invitesPageUrl(week: string, batch: number): Promise<string | null> {
-    const base = await this.deps.store.getSetting("public_url");
-    if (!this.deps.sign || !base) return null;
-    const t = await this.deps.sign(`invites:${week}:${batch}`);
-    return `${base}/convites?w=${week}&b=${batch}&t=${t}`;
+  private goalLine(total: number): string {
+    const left = WEEKLY_INVITE_GOAL - total;
+    const status = left > 0 ? `faltam <b>${left}</b>` : left === 0 ? "meta batida! 🎉" : `meta batida, +${-left} 🎉`;
+    return `🤝 Convites: <b>${total}</b> de ${WEEKLY_INVITE_GOAL} (${status})`;
   }
 
-  /** Marca o bloco como enviado (uma vez só) e devolve quantos convites entraram agora. */
-  async registerInvites(week: string, batch: number): Promise<number> {
-    const { store } = this.deps;
-    const pending = (await store.listRecruiterBatch(week, batch)).filter((r) => r.status === "suggested");
-    if (pending.length === 0) return 0;
-    await store.markRecruitersInvited(pending.map((r) => r.id));
-    for (const r of pending) await store.logAction("invite", r.id, this.iso());
-    return pending.length;
+  private async invitesLine(): Promise<string> {
+    return this.goalLine(await this.invitesThisWeek());
   }
 
-  /** Chamado pela página dos convites: registra e avisa no Telegram. */
-  async registerInvitesFromPage(week: string, batch: number): Promise<number> {
-    const n = await this.registerInvites(week, batch);
-    const chatId = await this.ownerChat();
-    if (n > 0 && chatId !== null) await this.deps.messenger.send(chatId, `✔️ Bloco ${batch}: ${n} convites registrados pela página.`);
-    return n;
-  }
-
-  private async onInvitesSent(data: string, chatId: number, messageId: number, callbackId: string) {
-    const [, week, rawBatch] = data.split(":");
-    const index = Number(rawBatch);
-    const n = await this.registerInvites(week, index);
+  /** Soma (ou corrige, com número negativo) os convites da semana. */
+  async addInvites(chatId: number, n: number): Promise<void> {
+    const { store, messenger } = this.deps;
     if (n === 0) {
-      await this.deps.messenger.answerCallback(callbackId, "Esse bloco já estava registrado.");
+      await messenger.send(chatId, await this.invitesLine());
       return;
     }
-    await this.deps.messenger.answerCallback(callbackId, `${n} convites registrados! 💪`);
-    const rows = await this.deps.store.listRecruiterBatch(week, index);
-    await this.deps.messenger.edit(chatId, messageId, `${recruiterBlock(rows, index, null, (index - 1) * BATCH_SIZE)}\n\n✔️ <i>${n} convites registrados</i>`);
+    const current = await this.invitesThisWeek();
+    if (current + n < 0) {
+      await messenger.send(chatId, `Esta semana só há ${current} convites registrados; não dá para tirar ${-n}.`);
+      return;
+    }
+    await store.logAction("invite", null, this.iso(), n);
+    const total = current + n;
+    const warn = total > 100 ? "\n\n⚠️ Acima de ~100 por semana o LinkedIn pode limitar a conta." : "";
+    await messenger.send(chatId, `${n > 0 ? `✔️ +${n} registrados.` : `✔️ ${n} corrigidos.`}\n${this.goalLine(total)}${warn}`);
   }
 
   /** Avisa no Telegram quando algo que roda sozinho falha (cron e fila). */
@@ -704,7 +659,6 @@ export class Bot {
       await messenger.answerCallback(cb.id);
       return;
     }
-    if (action === "iv") return this.onInvitesSent(cb.data!, chatId, messageId, cb.id);
     if (action.startsWith("c")) return this.onCarouselButton(action, id, chatId, messageId, cb.id);
 
     const post = await store.getPost(id);

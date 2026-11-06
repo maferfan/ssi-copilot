@@ -107,7 +107,7 @@ export class TelegramMessenger implements Messenger {
         { command: "fila", description: "Ver os posts salvos" },
         { command: "semana", description: "Resumo da semana" },
         { command: "metricas", description: "Registrar os números da semana (Análises do LinkedIn)" },
-        { command: "recrutadores", description: "Gerar a lista de recrutadores agora" },
+        { command: "convites", description: "Registrar convites e ver quantos faltam na semana" },
         { command: "painel", description: "Link do dashboard" },
         { command: "ajuda", description: "Como usar o bot" },
       ],

@@ -27,7 +27,7 @@ export async function loadDashboard(store: Store, now: Date): Promise<DashboardD
   const byWeek = new Map(keys.map((k) => [k, { week: k, comment: 0, post: 0, invite: 0, metrics: null } as WeekRow]));
   for (const a of actions) {
     const row = byWeek.get(weekKey(new Date(a.created_at)));
-    if (row && (a.type === "comment" || a.type === "post" || a.type === "invite")) row[a.type]++;
+    if (row && (a.type === "comment" || a.type === "post" || a.type === "invite")) row[a.type] += a.value ?? 1;
   }
   for (const m of metrics) {
     const row = byWeek.get(m.week);
@@ -241,7 +241,7 @@ export function dashboardHtml(data: DashboardData): string {
     <div class="grid3">
       ${card("Comentários", `${fmt(total("comment"))} no período`, barChart("Comentários por semana", weeks, data.weeks.map((w) => w.comment), ["comentário", "comentários"]))}
       ${card("Carrosséis publicados", `${fmt(total("post"))} no período`, barChart("Carrosséis por semana", weeks, data.weeks.map((w) => w.post), ["carrossel", "carrosséis"]))}
-      ${card("Convites a recrutadores", `${fmt(total("invite"))} no período`, barChart("Convites por semana", weeks, data.weeks.map((w) => w.invite), ["convite", "convites"]))}
+      ${card("Convites enviados", `${fmt(total("invite"))} no período`, barChart("Convites por semana", weeks, data.weeks.map((w) => w.invite), ["convite", "convites"]))}
     </div>
   </section>
 
