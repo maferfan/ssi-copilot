@@ -394,3 +394,12 @@ describe("nextPublishLabel", () => {
     expect(nextPublishLabel(new Date("2026-11-04T12:00:00Z"))).toBe("sexta, 06/11, às 18h");
   });
 });
+
+describe("idioma", () => {
+  it("o cartão avisa quando a sugestão é em inglês", async () => {
+    const { bot, messenger } = await setup();
+    await bot.handleUpdate(msg(`This is what you need to know about the new release and how it will change your work.\n${URL}`));
+    await bot.runDaily();
+    expect(messenger.lastCard()!.html).toContain("em inglês");
+  });
+});

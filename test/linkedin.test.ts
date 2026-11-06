@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { decodeEntities, extractLinkedInUrl, parsePostHtml, textAroundUrl } from "../src/linkedin";
 import { webhookSecret } from "../src/telegram";
+import { detectLanguage } from "../src/language";
+import { userPrompt } from "../src/claude";
 
 describe("extractLinkedInUrl", () => {
   it("acha o link no meio do texto e tira a pontuação final", () => {
@@ -50,5 +52,29 @@ describe("webhookSecret", () => {
     // printf '%s' "ssi-copilot:123:ABC" | sha256sum | cut -c1-48
     const expected = "02110598d0e7f19c66fbcb4881e87277f1fb6e0960581b7f";
     expect(await webhookSecret(token)).toBe(expected);
+  });
+});
+
+describe("detectLanguage", () => {
+  it.each([
+    ["Most developers ignore this when they build a design system, and it costs them later.", "en"],
+    ["A maioria dos devs ignora isso quando monta um design system, e depois paga caro.", "pt"],
+    ["Feature-Sliced Design: como organizar um projeto React que não vira bagunça", "pt"],
+    ["Why your Next.js app is slow: 5 things to check before you blame the framework", "en"],
+  ])("%s → %s", (text, lang) => {
+    expect(detectLanguage(text)).toBe(lang);
+  });
+
+  it("sem texto assume português", () => {
+    expect(detectLanguage(null)).toBe("pt");
+  });
+});
+
+describe("userPrompt", () => {
+  it("pede o comentário no idioma do post", () => {
+    const en = userPrompt({ url: "u", author: "A", text: "This is what you need to know about the new release." }, []);
+    const pt = userPrompt({ url: "u", author: "A", text: "Isso é o que você precisa saber sobre a nova versão." }, []);
+    expect(en).toContain("escreva o comentário em inglês");
+    expect(pt).toContain("português do Brasil");
   });
 });

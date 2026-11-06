@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Perfil } from "./perfil";
 import { normalizeCarousel } from "./carousel";
+import { detectLanguage } from "./language";
 import type { CarouselContent, Drafter, Post } from "./types";
 
 export const MODEL = "claude-sonnet-5-5";
@@ -27,13 +28,17 @@ export function userPrompt(post: Pick<Post, "url" | "author" | "text">, avoid: s
   const outras = avoid.length
     ? `\n\nJá foram sugeridas estas versões e o usuário pediu outra. Traga um ângulo diferente:\n${avoid.map((a) => `- ${a}`).join("\n")}`
     : "";
+  const idioma =
+    detectLanguage(post.text) === "en"
+      ? "O post está em inglês: escreva o comentário em inglês natural, como um profissional de tecnologia escreveria."
+      : "O post está em português: escreva o comentário em português do Brasil.";
   return `Post de ${post.author ?? "autor desconhecido"} (${post.url}):
 
 <post>
 ${post.text ?? ""}
 </post>
 
-Escreva um comentário para este post.${outras}`;
+Escreva um comentário para este post. ${idioma}${outras}`;
 }
 
 export function carouselSystemPrompt(p: Perfil): string {
