@@ -1,0 +1,90 @@
+import type { InlineButton, Messenger } from "./types";
+
+/** Parte mínima de um Update do Telegram que o bot usa. */
+export interface TgUpdate {
+  update_id: number;
+  message?: {
+    message_id: number;
+    chat: { id: number };
+    text?: string;
+    caption?: string;
+    entities?: { type: string; offset: number; length: number; url?: string }[];
+    caption_entities?: { type: string; offset: number; length: number; url?: string }[];
+  };
+  callback_query?: {
+    id: string;
+    data?: string;
+    message?: { message_id: number; chat: { id: number } };
+  };
+}
+
+function keyboard(buttons?: InlineButton[][]) {
+  return buttons ? { inline_keyboard: buttons.map((row) => row.map((b) => ({ text: b.text, callback_data: b.data }))) } : undefined;
+}
+
+export class TelegramMessenger implements Messenger {
+  constructor(private token: string) {}
+
+  private async call<T>(method: string, body: unknown): Promise<T> {
+    const res = await fetch(`https://api.telegram.org/bot${this.token}/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = (await res.json()) as { ok: boolean; result: T; description?: string };
+    if (!json.ok) throw new Error(`Telegram ${method}: ${json.description ?? res.status}`);
+    return json.result;
+  }
+
+  async send(chatId: number, html: string, buttons?: InlineButton[][]) {
+    const msg = await this.call<{ message_id: number }>("sendMessage", {
+      chat_id: chatId,
+      text: html,
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      reply_markup: keyboard(buttons),
+    });
+    return msg.message_id;
+  }
+
+  async edit(chatId: number, messageId: number, html: string, buttons?: InlineButton[][]) {
+    await this.call("editMessageText", {
+      chat_id: chatId,
+      message_id: messageId,
+      text: html,
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      reply_markup: keyboard(buttons) ?? { inline_keyboard: [] },
+    });
+  }
+
+  async answerCallback(callbackId: string, text?: string) {
+    await this.call("answerCallbackQuery", { callback_query_id: callbackId, text });
+  }
+
+  async setWebhook(url: string, secretToken: string) {
+    return this.call<boolean>("setWebhook", {
+      url,
+      secret_token: secretToken,
+      allowed_updates: ["message", "callback_query"],
+      drop_pending_updates: true,
+    });
+  }
+
+  async setCommands() {
+    return this.call<boolean>("setMyCommands", {
+      commands: [
+        { command: "agora", description: "Gerar as sugestões de comentário agora" },
+        { command: "fila", description: "Ver os posts salvos" },
+        { command: "semana", description: "Resumo das ações dos últimos 7 dias" },
+        { command: "ajuda", description: "Como usar o bot" },
+      ],
+    });
+  }
+}
+
+/** Segredo do webhook derivado do token: nada a mais para configurar. */
+export async function webhookSecret(botToken: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`ssi-copilot:${botToken}`));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 48);
+}
