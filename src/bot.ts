@@ -631,31 +631,64 @@ export class Bot {
 
 1. Abra cada link e toque em <b>Conectar</b>.
 2. Nos ${Math.min(NOTES_PER_WEEK, rows.length)} primeiros, toque em <b>Adicionar nota</b> e cole a nota (o LinkedIn gratuito libera poucas por mês).
-3. No fim de cada bloco, toque em <b>✔️ Enviei</b> para contar no resumo.`,
+3. No fim de cada bloco, toque em <b>✔️ Enviei</b> para contar no resumo.
+
+💻 No computador, o botão <b>🗂️ Abrir os 10</b> abre uma página que coloca os perfis em abas com um clique.`,
     );
     for (let b = 0; b < total; b++) {
       const batch = await store.listRecruiterBatch(week, first + b);
-      await messenger.send(chatId, recruiterBlock(batch, b + 1, total, b * BATCH_SIZE), [
-        [{ text: `✔️ Enviei estes ${batch.length}`, data: `iv:${week}:${first + b}` }],
-      ]);
+      const buttons: InlineButton[][] = [[{ text: `✔️ Enviei estes ${batch.length}`, data: `iv:${week}:${first + b}` }]];
+      const link = await this.invitesPageUrl(week, first + b);
+      if (link) buttons.unshift([{ text: `🗂️ Abrir os ${batch.length} no computador`, url: link }]);
+      await messenger.send(chatId, recruiterBlock(batch, b + 1, total, b * BATCH_SIZE), buttons);
     }
   }
 
-  private async onInvitesSent(data: string, chatId: number, messageId: number, callbackId: string) {
-    const { store, messenger } = this.deps;
-    const [, week, rawBatch] = data.split(":");
-    const rows = await store.listRecruiterBatch(week, Number(rawBatch));
-    const pending = rows.filter((r) => r.status === "suggested");
-    if (pending.length === 0) {
-      await messenger.answerCallback(callbackId, "Esse bloco já estava registrado.");
-      return;
-    }
-    await messenger.answerCallback(callbackId, `${pending.length} convites registrados! 💪`);
+  /** Link assinado da página do bloco (abre os perfis em abas). */
+  async invitesPageUrl(week: string, batch: number): Promise<string | null> {
+    const base = await this.deps.store.getSetting("public_url");
+    if (!this.deps.sign || !base) return null;
+    const t = await this.deps.sign(`invites:${week}:${batch}`);
+    return `${base}/convites?w=${week}&b=${batch}&t=${t}`;
+  }
+
+  /** Marca o bloco como enviado (uma vez só) e devolve quantos convites entraram agora. */
+  async registerInvites(week: string, batch: number): Promise<number> {
+    const { store } = this.deps;
+    const pending = (await store.listRecruiterBatch(week, batch)).filter((r) => r.status === "suggested");
+    if (pending.length === 0) return 0;
     await store.markRecruitersInvited(pending.map((r) => r.id));
     for (const r of pending) await store.logAction("invite", r.id, this.iso());
+    return pending.length;
+  }
+
+  /** Chamado pela página dos convites: registra e avisa no Telegram. */
+  async registerInvitesFromPage(week: string, batch: number): Promise<number> {
+    const n = await this.registerInvites(week, batch);
+    const chatId = await this.ownerChat();
+    if (n > 0 && chatId !== null) await this.deps.messenger.send(chatId, `✔️ Bloco ${batch}: ${n} convites registrados pela página.`);
+    return n;
+  }
+
+  private async onInvitesSent(data: string, chatId: number, messageId: number, callbackId: string) {
+    const [, week, rawBatch] = data.split(":");
     const index = Number(rawBatch);
-    const done = rows.map((r) => ({ ...r, status: "invited" as const }));
-    await messenger.edit(chatId, messageId, `${recruiterBlock(done, index, null, (index - 1) * BATCH_SIZE)}\n\n✔️ <i>${pending.length} convites registrados</i>`);
+    const n = await this.registerInvites(week, index);
+    if (n === 0) {
+      await this.deps.messenger.answerCallback(callbackId, "Esse bloco já estava registrado.");
+      return;
+    }
+    await this.deps.messenger.answerCallback(callbackId, `${n} convites registrados! 💪`);
+    const rows = await this.deps.store.listRecruiterBatch(week, index);
+    await this.deps.messenger.edit(chatId, messageId, `${recruiterBlock(rows, index, null, (index - 1) * BATCH_SIZE)}\n\n✔️ <i>${n} convites registrados</i>`);
+  }
+
+  /** Avisa no Telegram quando algo que roda sozinho falha (cron e fila). */
+  async reportFailure(what: string, err: unknown): Promise<void> {
+    const chatId = await this.ownerChat();
+    if (chatId === null) return;
+    const reason = err instanceof Error ? err.message : String(err);
+    await this.deps.messenger.send(chatId, `⚠️ <b>${esc(what)}</b> falhou: ${esc(reason.slice(0, 300))}\n\nDetalhes no painel da Cloudflare → Workers &amp; Pages → ssi-copilot → Logs.`);
   }
 
   // ---------- botões ----------

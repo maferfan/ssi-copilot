@@ -19,7 +19,9 @@ export interface TgUpdate {
 }
 
 function keyboard(buttons?: InlineButton[][]) {
-  return buttons ? { inline_keyboard: buttons.map((row) => row.map((b) => ({ text: b.text, callback_data: b.data }))) } : undefined;
+  return buttons
+    ? { inline_keyboard: buttons.map((row) => row.map((b) => (b.url ? { text: b.text, url: b.url } : { text: b.text, callback_data: b.data }))) }
+    : undefined;
 }
 
 export class TelegramMessenger implements Messenger {

@@ -145,3 +145,46 @@ describe("fila de trabalhos longos (webhook)", () => {
     expect(ctx.store.jobs.every((j) => j.status === "done")).toBe(true);
   });
 });
+
+describe("página dos convites (computador)", () => {
+  async function signed() {
+    const ctx = makeDeps({ now: () => new Date("2026-11-08T11:00:00Z") });
+    ctx.deps.sign = async (p) => `sig(${p})`;
+    await ctx.store.setSetting("public_url", "https://bot.example.workers.dev");
+    const bot = new Bot(ctx.deps, perfil);
+    await bot.handleUpdate(msg("/start"));
+    return { ...ctx, bot };
+  }
+
+  it("cada bloco ganha o link assinado da página antes do botão 'Enviei'", async () => {
+    const { bot, messenger } = await signed();
+    await bot.runInvites();
+    const block = messenger.sent.find((s) => s.html.includes("Bloco 2/5"))!;
+    expect(block.buttons?.[0][0].url).toBe("https://bot.example.workers.dev/convites?w=2026-11-02&b=2&t=sig(invites:2026-11-02:2)");
+    expect(block.buttons?.[1][0].data).toBe("iv:2026-11-02:2");
+  });
+
+  it("registrar pela página conta uma vez e avisa no Telegram", async () => {
+    const { bot, store, messenger } = await signed();
+    await bot.runInvites();
+    expect(await bot.registerInvitesFromPage("2026-11-02", 1)).toBe(10);
+    expect(messenger.last().html).toContain("Bloco 1: 10 convites registrados pela página");
+    expect(await bot.registerInvitesFromPage("2026-11-02", 1)).toBe(0);
+    await bot.handleUpdate(click("iv:2026-11-02:1"));
+    expect(messenger.answers.at(-1)?.text).toContain("já estava registrado");
+    expect(store.actions.filter((a) => a.type === "invite")).toHaveLength(10);
+  });
+
+  it("sem assinatura configurada, o bloco vem só com o botão 'Enviei'", async () => {
+    const { bot, messenger } = await setup();
+    await bot.runInvites();
+    const block = messenger.sent.find((s) => s.html.includes("Bloco 1/5"))!;
+    expect(block.buttons).toHaveLength(1);
+  });
+
+  it("falhas de trabalhos automáticos chegam no Telegram", async () => {
+    const { bot, messenger } = await setup();
+    await bot.reportFailure("A lista de recrutadores", new Error("HTTP 529 <overloaded>"));
+    expect(messenger.last().html).toContain("<b>A lista de recrutadores</b> falhou: HTTP 529 &lt;overloaded&gt;");
+  });
+});
