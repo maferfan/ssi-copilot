@@ -41,6 +41,15 @@ export interface Carousel {
   status: CarouselStatus;
   created_at: string;
   published_at: string | null;
+  post_url: string | null;
+}
+
+/** Números da semana copiados das Análises do LinkedIn. */
+export interface WeeklyMetrics {
+  week: string;
+  profile_views: number;
+  impressions: number;
+  followers: number;
 }
 
 export type ActionType = "comment" | "post" | "invite" | "ssi";
@@ -50,7 +59,8 @@ export type Awaiting =
   | { type: "post_text"; postId: number }
   | { type: "edit"; postId: number }
   | { type: "carousel_topic" }
-  | { type: "carousel_adjust"; carouselId: number };
+  | { type: "carousel_adjust"; carouselId: number }
+  | { type: "metrics"; week: string };
 
 export interface Store {
   getSetting(key: string): Promise<string | null>;
@@ -61,8 +71,12 @@ export interface Store {
   listPosts(statuses: PostStatus[], limit: number): Promise<Post[]>;
   addCarousel(c: { topic: string; content: CarouselContent; createdAt: string }): Promise<number>;
   getCarousel(id: number): Promise<Carousel | null>;
-  updateCarousel(id: number, patch: Partial<Pick<Carousel, "status" | "published_at">>): Promise<void>;
+  updateCarousel(id: number, patch: Partial<Pick<Carousel, "status" | "published_at" | "post_url">>): Promise<void>;
   listCarousels(statuses: CarouselStatus[]): Promise<Carousel[]>;
+  saveMetrics(m: WeeklyMetrics, updatedAt: string): Promise<void>;
+  /** Semanas a partir de `sinceWeek`, em ordem. */
+  listMetrics(sinceWeek: string): Promise<WeeklyMetrics[]>;
+  listActionsSince(sinceIso: string): Promise<{ type: ActionType; created_at: string }[]>;
   logAction(type: ActionType, refId: number | null, createdAt: string, value?: number | null): Promise<void>;
   countActionsSince(sinceIso: string): Promise<Record<string, number>>;
 }

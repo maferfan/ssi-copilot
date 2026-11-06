@@ -1,4 +1,4 @@
-import type { ActionType, Carousel, CarouselContent, CarouselStatus, Post, PostStatus, Store } from "./types";
+import type { ActionType, Carousel, CarouselContent, CarouselStatus, Post, PostStatus, Store, WeeklyMetrics } from "./types";
 
 interface CarouselRow extends Omit<Carousel, "content"> {
   content: string;
@@ -72,7 +72,7 @@ export class D1Store implements Store {
     return row ? toCarousel(row) : null;
   }
 
-  async updateCarousel(id: number, patch: Partial<Pick<Carousel, "status" | "published_at">>) {
+  async updateCarousel(id: number, patch: Partial<Pick<Carousel, "status" | "published_at" | "post_url">>) {
     const keys = Object.keys(patch) as (keyof typeof patch)[];
     if (keys.length === 0) return;
     await this.db
@@ -88,6 +88,33 @@ export class D1Store implements Store {
       .bind(...statuses)
       .all<CarouselRow>();
     return results.map(toCarousel);
+  }
+
+  async saveMetrics(m: WeeklyMetrics, updatedAt: string) {
+    await this.db
+      .prepare(
+        `INSERT INTO metrics (week, profile_views, impressions, followers, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(week) DO UPDATE SET profile_views = excluded.profile_views, impressions = excluded.impressions,
+           followers = excluded.followers, updated_at = excluded.updated_at`,
+      )
+      .bind(m.week, m.profile_views, m.impressions, m.followers, updatedAt)
+      .run();
+  }
+
+  async listMetrics(sinceWeek: string) {
+    const { results } = await this.db
+      .prepare("SELECT week, profile_views, impressions, followers FROM metrics WHERE week >= ? ORDER BY week")
+      .bind(sinceWeek)
+      .all<WeeklyMetrics>();
+    return results;
+  }
+
+  async listActionsSince(sinceIso: string) {
+    const { results } = await this.db
+      .prepare("SELECT type, created_at FROM actions WHERE created_at >= ? ORDER BY created_at")
+      .bind(sinceIso)
+      .all<{ type: ActionType; created_at: string }>();
+    return results;
   }
 
   async logAction(type: ActionType, refId: number | null, createdAt: string, value: number | null = null) {

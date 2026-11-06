@@ -2,6 +2,7 @@ import type { BrowserWorker } from "@cloudflare/puppeteer";
 import { Bot } from "./bot";
 import { BrowserRenderer } from "./carousel";
 import { ClaudeDrafter } from "./claude";
+import { dashboardHtml, loadDashboard } from "./dashboard";
 import { fetchPreview } from "./linkedin";
 import { LinkedInGateway } from "./linkedin-api";
 import { perfil } from "./perfil";
@@ -88,6 +89,14 @@ export default {
         console.error("oauth falhou", err);
         return page("Não conectado", String((err as Error).message), 400);
       }
+    }
+
+    // Painel público com as ações da semana e os números do LinkedIn
+    if (request.method === "GET" && url.pathname === "/dashboard") {
+      const data = await loadDashboard(new D1Store(env.DB), new Date());
+      return new Response(dashboardHtml(data), {
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=300" },
+      });
     }
 
     // Chamado pelo deploy para registrar o webhook. Exige o mesmo segredo.

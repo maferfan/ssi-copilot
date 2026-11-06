@@ -2,7 +2,8 @@ import { detectLanguage } from "./language";
 import { extractLinkedInUrl, extractPostUrn, textAroundUrl } from "./linkedin";
 import type { Perfil } from "./perfil";
 import type { TgUpdate } from "./telegram";
-import type { Awaiting, Carousel, CarouselContent, Deps, InlineButton, LinkedInConnection, Post } from "./types";
+import type { Awaiting, Carousel, CarouselContent, Deps, InlineButton, LinkedInConnection, Post, WeeklyMetrics } from "./types";
+import { shiftWeek, weekKey, weekLabel, weekStartInstant } from "./week";
 
 /** Quantos posts no máximo viram sugestão a cada rodada das 18h. */
 export const DAILY_LIMIT = 3;
@@ -55,10 +56,28 @@ const HELP = `<b>Como funciona</b>
 2. Eu monto os slides e mando a prévia.
 3. Aprovado, ele é publicado na sexta às 18h.
 
+<b>Resumo e painel</b>
+Domingo às 18h chega o resumo da semana e eu peço 3 números das Análises do LinkedIn (/metricas). Eles vão para o painel (/painel).
+
 /conectar — conectar o LinkedIn (vale por 2 meses)
 /agora — gerar as sugestões de comentário agora
 /fila — ver os posts salvos
-/semana — resumo dos últimos 7 dias`;
+/semana — resumo da semana
+/metricas — registrar os números da semana
+/painel — link do dashboard`;
+
+/** "120 3.400 215" → [120, 3400, 215]. Pontos e vírgulas são separadores de milhar. */
+export function parseMetrics(text: string): [number, number, number] | null {
+  const nums = (text.match(/\d[\d.,]*/g) ?? []).map((n) => Number(n.replace(/[.,]/g, "")));
+  return nums.length === 3 && nums.every(Number.isFinite) ? [nums[0], nums[1], nums[2]] : null;
+}
+
+const METRICS_HOWTO = `Abra o seu perfil no LinkedIn → <b>Análises</b> e me mande 3 números, nesta ordem:
+1. <b>Visualizações do perfil</b> (últimos 7 dias)
+2. <b>Impressões dos posts</b> (últimos 7 dias)
+3. <b>Seguidores</b> (total)
+
+Exemplo: <code>120 3400 215</code>`;
 
 export function draftCard(post: Post, index?: { i: number; total: number }): string {
   const head = index ? `📝 <b>Post ${index.i}/${index.total}</b>` : "📝 <b>Post</b>";
@@ -186,7 +205,22 @@ export class Bot {
           await this.sendQueue(chatId);
           return;
         case "semana":
-          await this.sendWeek(chatId);
+          await this.sendWeek(chatId, false);
+          return;
+        case "metricas":
+        case "métricas": {
+          const week = weekKey(this.deps.now());
+          const nums = parseMetrics(arg);
+          if (nums) await this.saveMetrics(chatId, week, nums);
+          else {
+            await this.setAwaiting({ type: "metrics", week });
+            await messenger.send(chatId, METRICS_HOWTO);
+          }
+          return;
+        }
+        case "painel":
+        case "dashboard":
+          await messenger.send(chatId, `📊 Painel: ${esc(await this.dashboardUrl())}`);
           return;
         case "conectar":
           await this.sendConnect(chatId);
@@ -240,6 +274,15 @@ export class Bot {
           if (prev) await this.createCarousel(chatId, prev.topic, prev, text);
           return;
         }
+        case "metrics": {
+          const nums = parseMetrics(text);
+          if (nums) await this.saveMetrics(chatId, awaiting.week, nums);
+          else {
+            await this.setAwaiting(awaiting);
+            await messenger.send(chatId, `Não entendi. Preciso de exatamente 3 números.\n\n${METRICS_HOWTO}`);
+          }
+          return;
+        }
       }
     }
 
@@ -290,13 +333,53 @@ export class Bot {
     await this.deps.messenger.send(chatId, `<b>Fila (${posts.length})</b>\n\n${lines.join("\n")}`);
   }
 
-  private async sendWeek(chatId: number) {
-    const since = new Date(this.deps.now().getTime() - 7 * DAY_MS).toISOString();
-    const c = await this.deps.store.countActionsSince(since);
-    await this.deps.messenger.send(
-      chatId,
-      `<b>Últimos 7 dias</b>\n\n💬 Comentários: ${c.comment ?? 0}\n🎠 Posts: ${c.post ?? 0}\n🤝 Convites: ${c.invite ?? 0}`,
-    );
+  private async dashboardUrl() {
+    const base = (await this.deps.store.getSetting("public_url")) ?? "";
+    return `${base}/dashboard`;
+  }
+
+  /** Ações da semana (segunda a domingo) comparadas com a anterior; no domingo, pede os números. */
+  async sendWeek(chatId: number, askMetrics: boolean) {
+    const { store, messenger } = this.deps;
+    const week = weekKey(this.deps.now());
+    const prevWeek = shiftWeek(week, -1);
+    const actions = await store.listActionsSince(weekStartInstant(prevWeek).toISOString());
+    const count = (w: string, type: string) => actions.filter((a) => a.type === type && weekKey(new Date(a.created_at)) === w).length;
+    const line = (icon: string, label: string, type: string) => {
+      const cur = count(week, type);
+      const diff = cur - count(prevWeek, type);
+      const cmp = diff === 0 ? "" : ` (${diff > 0 ? "+" : "−"}${Math.abs(diff)} vs. semana passada)`;
+      return `${icon} ${label}: <b>${cur}</b>${cmp}`;
+    };
+    const metrics = (await store.listMetrics(week)).find((m) => m.week === week);
+    const parts = [
+      `📊 <b>Semana de ${weekLabel(week)}</b>`,
+      [line("💬", "Comentários", "comment"), line("🎠", "Carrosséis", "post"), line("🤝", "Convites", "invite")].join("\n"),
+    ];
+    if (metrics) parts.push(this.metricsLine(metrics));
+    parts.push(`Painel: ${esc(await this.dashboardUrl())}`);
+    if (askMetrics && !metrics) {
+      await this.setAwaiting({ type: "metrics", week });
+      parts.push(`Para fechar a semana:\n${METRICS_HOWTO}`);
+    }
+    await messenger.send(chatId, parts.join("\n\n"));
+  }
+
+  private metricsLine(m: WeeklyMetrics) {
+    const nf = new Intl.NumberFormat("pt-BR");
+    return `👀 Visualizações do perfil: <b>${nf.format(m.profile_views)}</b>\n📈 Impressões: <b>${nf.format(m.impressions)}</b>\n👥 Seguidores: <b>${nf.format(m.followers)}</b>`;
+  }
+
+  private async saveMetrics(chatId: number, week: string, [views, impressions, followers]: [number, number, number]) {
+    const { store, messenger } = this.deps;
+    const m: WeeklyMetrics = { week, profile_views: views, impressions, followers };
+    await store.saveMetrics(m, this.iso());
+    const prev = (await store.listMetrics(shiftWeek(week, -1))).find((x) => x.week === shiftWeek(week, -1));
+    const diff = (a: number, b: number) => (a === b ? "igual" : `${a > b ? "+" : "−"}${new Intl.NumberFormat("pt-BR").format(Math.abs(a - b))}`);
+    const cmp = prev
+      ? `\n\nVs. semana passada: visualizações ${diff(views, prev.profile_views)}, impressões ${diff(impressions, prev.impressions)}, seguidores ${diff(followers, prev.followers)}.`
+      : "";
+    await messenger.send(chatId, `✅ Números da semana de ${weekLabel(week)} salvos.\n\n${this.metricsLine(m)}${cmp}\n\n📊 ${esc(await this.dashboardUrl())}`);
   }
 
   private async sendConnect(chatId: number) {
@@ -430,7 +513,7 @@ export class Bot {
     try {
       rendered = await renderer.render(c.content);
       const url = await linkedin.publishCarousel(rendered, c.content.titulo, c.content.legenda);
-      await store.updateCarousel(c.id, { status: "published", published_at: this.iso() });
+      await store.updateCarousel(c.id, { status: "published", published_at: this.iso(), post_url: url });
       await store.logAction("post", c.id, this.iso());
       await messenger.send(chatId, `🚀 <b>Carrossel publicado!</b> · ${esc(c.topic)}\n\n🔗 ${esc(url)}`);
     } catch (err) {
@@ -531,12 +614,16 @@ export class Bot {
 
   // ---------- agendamentos ----------
 
-  /** Cron das 18h (Brasília): comentários todo dia, lembrete na quinta, carrossel na sexta. */
+  /** Cron das 18h (Brasília): comentários todo dia, lembrete na quinta, carrossel na sexta, resumo no domingo. */
   async runScheduled(): Promise<void> {
     const day = brWeekday(this.deps.now());
     if (day === 5) await this.publishCarousel();
     await this.runDaily();
     if (day === 4) await this.remindCarousel();
+    if (day === 0) {
+      const chatId = await this.ownerChat();
+      if (chatId !== null) await this.sendWeek(chatId, true);
+    }
   }
 
   async runDaily(): Promise<void> {

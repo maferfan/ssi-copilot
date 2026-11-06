@@ -103,7 +103,9 @@ export class TelegramMessenger implements Messenger {
         { command: "carrossel", description: "Criar o carrossel de sexta: /carrossel <tema>" },
         { command: "conectar", description: "Conectar ou ver a conexão com o LinkedIn" },
         { command: "fila", description: "Ver os posts salvos" },
-        { command: "semana", description: "Resumo das ações dos últimos 7 dias" },
+        { command: "semana", description: "Resumo da semana" },
+        { command: "metricas", description: "Registrar os números da semana (Análises do LinkedIn)" },
+        { command: "painel", description: "Link do dashboard" },
         { command: "ajuda", description: "Como usar o bot" },
       ],
     });

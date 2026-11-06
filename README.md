@@ -1,6 +1,12 @@
 # SSI Copilot
 
-Um copiloto pessoal para aumentar o **SSI (Social Selling Index) do LinkedIn** sem depender de memória e sem arriscar a conta.
+Um copiloto pessoal para manter constância no LinkedIn (comentar, publicar e ampliar a rede) sem depender de memória e sem arriscar a conta.
+
+> Nasceu para subir o **SSI (Social Selling Index)**. Em 2026 o LinkedIn deixou de mostrar o SSI para contas sem Sales Navigator, então o projeto passou a medir o que continua visível de graça: visualizações do perfil, impressões e seguidores. Os hábitos que o SSI premiava são os mesmos.
+
+**Painel ao vivo:** [ssi-copilot.matheusferrazza.workers.dev/dashboard](https://ssi-copilot.matheusferrazza.workers.dev/dashboard)
+
+![Painel com dados de exemplo](docs/dashboard-exemplo.png)
 
 ## O problema
 
@@ -20,7 +26,8 @@ O sistema faz a parte chata (lembrar, ler, escrever o rascunho) e deixa para mim
 | **Quando eu quiser** | Mando `/carrossel <tema>`; o Claude monta os slides e eu aprovo a prévia | Eu + Claude |
 | **Sexta, 18h** | O carrossel aprovado é publicado no meu perfil | API do LinkedIn |
 | **Sábado** *(fase 4)* | Lista de recrutadores da minha área com notas de conexão prontas | Claude + busca pública |
-| **Domingo** *(fase 2)* | Resumo da semana e dashboard das ações | Bot |
+| **Domingo, 18h** | Resumo da semana; mando 3 números das Análises do LinkedIn | Bot + eu (30 segundos) |
+| **Sempre** | Painel público com ações e resultados das últimas 12 semanas | Worker |
 
 Nada é publicado ou enviado no LinkedIn sem eu ver antes. Isso respeita os termos da plataforma, protege a conta e garante que nada sai com o meu nome sem revisão.
 
@@ -44,7 +51,9 @@ Nada é publicado ou enviado no LinkedIn sem eu ver antes. Isso respeita os term
 | `/carrossel <tema>` | Cria o carrossel da semana |
 | `/agora` | Gera as sugestões na hora, sem esperar as 18h |
 | `/fila` | Mostra os posts salvos e em que etapa cada um está |
-| `/semana` | Resumo das ações dos últimos 7 dias |
+| `/semana` | Resumo da semana (segunda a domingo), comparado com a anterior |
+| `/metricas 120 3400 215` | Registra visualizações do perfil, impressões e seguidores da semana |
+| `/painel` | Link do dashboard |
 | `/ajuda` | Explica como usar |
 
 ---
@@ -109,7 +118,7 @@ flowchart LR
 | **TypeScript** | Linguagem | Tipos pegam erros antes do deploy (ex.: um status de post que não existe) | JavaScript puro |
 | **Wrangler** | CLI da Cloudflare | Publica o Worker, aplica migrações e grava segredos; o `wrangler.toml` descreve tudo em texto | Configurar à mão no painel |
 | **GitHub Actions** | CI e deploy | Testa cada pull request e publica cada push na `main`, sem instalar nada no computador | Deploy manual |
-| **Vitest** | Testes | Rápido, roda TypeScript direto; 62 testes em cerca de 1 segundo | Jest |
+| **Vitest** | Testes | Rápido, roda TypeScript direto; 88 testes em cerca de 1 segundo | Jest |
 
 ### Técnicas de engenharia
 
@@ -140,7 +149,9 @@ falta o texto → aguardando 18h → sugestão enviada → aprovado → comentad
 
 **Plano B em cascata na publicação.** Primeiro tenta como documento (o carrossel em PDF do LinkedIn). Se o LinkedIn negar, publica como post de várias imagens. Se ainda falhar, manda o PDF e a legenda para eu postar à mão. Comentários seguem a mesma ideia: se a API recusar, o texto vem pronto para copiar.
 
-**Agenda por dia da semana.** Um único cron às 18h decide o que fazer pelo dia em Brasília: comentários todo dia, lembrete na quinta, publicação na sexta.
+**Agenda por dia da semana.** Um único cron às 18h decide o que fazer pelo dia em Brasília: comentários todo dia, lembrete na quinta, publicação na sexta, resumo no domingo. As semanas vão de segunda a domingo no horário de Brasília ([`src/week.ts`](src/week.ts)); números enviados na segunda de manhã ainda contam para a semana do resumo.
+
+**Dashboard sem framework.** O painel ([`src/dashboard.ts`](src/dashboard.ts)) é HTML montado no próprio Worker, com gráficos em SVG desenhados no servidor: nenhuma biblioteca de gráficos, nenhum build. Cada medida tem o seu gráfico (escalas diferentes nunca dividem o mesmo eixo), semanas sem número viram lacuna na linha em vez de zero, só o último valor ganha rótulo, cada barra e ponto tem dica ao passar o mouse e há uma tabela com todos os números.
 
 **Resiliência na API do Claude.** `fallbacks: "default"` faz a própria API tentar de novo em outro modelo se houver uma recusa por falso positivo. Se mesmo assim vier recusa (`stop_reason: "refusal"`), o bot avisa em vez de mandar um comentário vazio.
 
@@ -180,6 +191,9 @@ O bot nunca trava por causa do LinkedIn.
 | [`src/carousel.ts`](src/carousel.ts) | Modelo HTML dos slides e geração do PDF/imagens |
 | [`src/crypto.ts`](src/crypto.ts) | Criptografia do token do LinkedIn |
 | [`src/linkedin.ts`](src/linkedin.ts) | Extrair o link e ler a prévia pública do post |
+| [`src/dashboard.ts`](src/dashboard.ts) | Painel: dados por semana e gráficos em SVG |
+| [`src/week.ts`](src/week.ts) | Semanas de segunda a domingo no horário de Brasília |
+| [`src/language.ts`](src/language.ts) | Detecta se o post está em português ou inglês |
 | [`src/telegram.ts`](src/telegram.ts) | Cliente da Bot API (mensagens, álbum, PDF) e senha do webhook |
 | [`src/store.ts`](src/store.ts) | Acesso ao D1 |
 | [`migrations/`](migrations) | Estrutura do banco |
@@ -255,7 +269,7 @@ npm run typecheck
 ## Roadmap
 
 - [x] **Fase 1**: salvar posts pelo Telegram, sugestões às 18h, aprovar/editar/pular, registro de comentários
-- [ ] **Fase 2**: resumo de domingo, registro do SSI semanal e dashboard público das ações
+- [x] **Fase 2**: resumo de domingo, números semanais das Análises do LinkedIn e dashboard público
 - [x] **Fase 3**: conexão OAuth com o LinkedIn, comentários publicados ao aprovar, carrossel com prévia e publicação na sexta
 - [ ] **Fase 4**: lista de sábado com 50 recrutadores da área e notas de conexão
 
