@@ -46,16 +46,18 @@ Nada é publicado ou enviado no LinkedIn sem eu ver antes. Isso respeita os term
 4. O total entra no `/semana`, no resumo de domingo e no gráfico do painel.
 
 **Carrossel de sexta**
-1. `/carrossel como escolher a stack de um site`: o Claude escreve capa, slides, fechamento e legenda.
-2. Chegam as imagens dos slides e os botões **✅ Aprovar · 🔄 Refazer · ✏️ Ajustar · ❌ Descartar**. Em Ajustar, eu digo o que mudar ("slide 3 mais técnico").
-3. Aprovado, ele sai na sexta às 18h. Na quinta, se nada estiver aprovado, o bot pergunta o tema.
-4. Se a publicação falhar, o bot manda o PDF e a legenda para postar à mão.
+1. `/carrossel how to choose a website stack`: o Claude **pesquisa na web** dados sobre o tema e escreve o carrossel **em inglês**: capa, 4 a 6 slides, um slide de fontes, fechamento e legenda.
+2. **Todo slide de conteúdo tem um gráfico.** Com dado de pesquisa, o gráfico leva a fonte ("Source: …, 2025") e a fonte entra no slide de referências. Sem dado confiável, o gráfico sai marcado como **"Illustrative data, not a measurement"**.
+3. Chegam as imagens dos slides e o cartão com as fontes, o custo daquele carrossel (tokens, buscas e US$) e os botões **✅ Aprovar · 🔄 Refazer · ✏️ Ajustar · ❌ Descartar**. Ajustar reaproveita a pesquisa (sem novo custo de busca); Refazer pesquisa de novo.
+4. Aprovado, ele entra na **próxima sexta livre**, às 18h. Se a próxima sexta já tem um, vai para a seguinte, e assim por diante. `/agenda` mostra a fila; descartar um agendado libera a sexta dele.
+5. Na quinta, se não houver carrossel para o dia seguinte, o bot pergunta o tema. Se a publicação falhar, manda o PDF e a legenda para postar à mão.
 
 | Comando | O que faz |
 |---|---|
 | `/conectar` | Conecta o LinkedIn (OAuth) ou mostra até quando a conexão vale |
 | `/carrossel <tema>` | Cria o carrossel da semana |
 | `/agora` | Gera as sugestões na hora, sem esperar as 18h |
+| `/agenda` | Carrosséis aprovados, com a sexta de cada um |
 | `/fila` | Mostra os posts salvos e em que etapa cada um está |
 | `/semana` | Resumo da semana (segunda a domingo), comparado com a anterior |
 | `/metricas 120 3400 215` | Registra visualizações do perfil, impressões e seguidores da semana |
@@ -125,7 +127,7 @@ flowchart LR
 | **TypeScript** | Linguagem | Tipos pegam erros antes do deploy (ex.: um status de post que não existe) | JavaScript puro |
 | **Wrangler** | CLI da Cloudflare | Publica o Worker, aplica migrações e grava segredos; o `wrangler.toml` descreve tudo em texto | Configurar à mão no painel |
 | **GitHub Actions** | CI e deploy | Testa cada pull request e publica cada push na `main`, sem instalar nada no computador | Deploy manual |
-| **Vitest** | Testes | Rápido, roda TypeScript direto; 104 testes em cerca de 1 segundo | Jest |
+| **Vitest** | Testes | Rápido, roda TypeScript direto; 118 testes em cerca de 1 segundo | Jest |
 
 ### Técnicas de engenharia
 
@@ -151,6 +153,14 @@ falta o texto → aguardando 18h → sugestão enviada → aprovado → comentad
 - Em "Outra versão", o rascunho anterior vai junto com o pedido de um ângulo diferente.
 
 **OAuth 2.0 com o LinkedIn.** `/conectar` gera um link com um `state` aleatório que vale 15 minutos. Na volta, o Worker confere o `state` (impede conexões forjadas), troca o código por um token de 60 dias e o guarda **criptografado com AES-GCM** ([`src/crypto.ts`](src/crypto.ts)). A senha do LinkedIn nunca passa pelo bot. Uma semana antes de vencer, o bot avisa para renovar.
+
+**Gráficos com fonte conferida, não inventada.** O carrossel é feito em dois passos ([`src/claude.ts`](src/claude.ts)):
+1. *Pesquisa:* o Claude usa a busca na web e devolve de 3 a 6 dados com fonte, ano, link e os números como foram publicados. O código só aceita um dado se o **link apareceu de verdade nos resultados da busca** (ou nas citações), nunca no texto livre do modelo, e se tiver de 2 a 8 números.
+2. *Escrita:* com saída estruturada, o Claude escreve os slides e escolhe, para cada gráfico, qual dado da pesquisa usar (pelo id) ou "ilustrativo". **Os números de um gráfico com fonte vêm da pesquisa conferida, nunca do texto escrito no segundo passo.** Um id que não existe vira ilustrativo, sem fonte.
+
+**Custo medido por carrossel.** Os tokens de entrada e saída e as buscas dos dois passos vêm do `usage` da API e são convertidos em dólar pelo preço do Sonnet 5.5 (US$ 2 / US$ 10 por milhão de tokens; US$ 10 por mil buscas). O valor aparece no cartão de cada carrossel.
+
+**Fila de sextas.** Cada carrossel aprovado guarda a sexta em que sai (`scheduled_for`). Aprovar outro pega a primeira sexta livre a partir da próxima; na sexta, sai só o da vez (ou um atrasado, se uma sexta passou sem publicar).
 
 **Saída estruturada.** O carrossel é pedido com um JSON Schema: capa, lista de slides, fechamento e legenda. A API garante o formato, e o código ainda confere ([`normalizeCarousel`](src/carousel.ts)) antes de desenhar.
 
@@ -220,7 +230,7 @@ O bot nunca trava por causa do LinkedIn.
 | API do LinkedIn | Grátis |
 | Telegram | Grátis |
 | GitHub Actions | Grátis (repositório público) |
-| Claude API (Sonnet 5.5) | ~US$ 2–3 em créditos pré-pagos (3 comentários/dia e 4 carrosséis) |
+| Claude API (Sonnet 5.5) | ~US$ 2–3 em créditos pré-pagos (3 comentários/dia e 4 carrosséis com pesquisa, ~US$ 0,15–0,30 cada) |
 
 ---
 

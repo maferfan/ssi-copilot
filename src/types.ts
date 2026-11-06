@@ -19,12 +19,39 @@ export interface Post {
   created_at: string;
 }
 
+export interface Reference {
+  nome: string;
+  url: string;
+  ano: string;
+}
+
+export interface CarouselChart {
+  tipo: "bar" | "line";
+  titulo: string;
+  unidade: string;
+  dados: { label: string; valor: number }[];
+  /** null quando o gráfico é ilustrativo. */
+  fonte: Reference | null;
+  ilustrativo: boolean;
+}
+
+/** Tokens e buscas gastos para escrever o carrossel. */
+export interface CarouselCost {
+  inputTokens: number;
+  outputTokens: number;
+  searches: number;
+  usd: number;
+}
+
 export interface CarouselContent {
   titulo: string;
   subtitulo: string;
-  slides: { titulo: string; texto: string }[];
+  slides: { titulo: string; texto: string; grafico?: CarouselChart }[];
   fechamento: { titulo: string; texto: string };
   legenda: string;
+  /** Fontes usadas nos gráficos, na ordem do slide de referências. */
+  referencias?: Reference[];
+  custo?: CarouselCost;
 }
 
 export type CarouselStatus =
@@ -42,6 +69,8 @@ export interface Carousel {
   created_at: string;
   published_at: string | null;
   post_url: string | null;
+  /** Sexta em que sai (AAAA-MM-DD, horário de Brasília); só para aprovados. */
+  scheduled_for: string | null;
 }
 
 /** Números da semana copiados das Análises do LinkedIn. */
@@ -77,7 +106,7 @@ export interface Store {
   listPosts(statuses: PostStatus[], limit: number): Promise<Post[]>;
   addCarousel(c: { topic: string; content: CarouselContent; createdAt: string }): Promise<number>;
   getCarousel(id: number): Promise<Carousel | null>;
-  updateCarousel(id: number, patch: Partial<Pick<Carousel, "status" | "published_at" | "post_url">>): Promise<void>;
+  updateCarousel(id: number, patch: Partial<Pick<Carousel, "status" | "published_at" | "post_url" | "scheduled_for">>): Promise<void>;
   listCarousels(statuses: CarouselStatus[]): Promise<Carousel[]>;
   saveMetrics(m: WeeklyMetrics, updatedAt: string): Promise<void>;
   /** Semanas a partir de `sinceWeek`, em ordem. */

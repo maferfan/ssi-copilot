@@ -295,15 +295,40 @@ describe("carrossel", () => {
     expect(drafter.carouselCalls[0].topic).toBe("performance web");
   });
 
-  it("aprovar agenda; aprovar outro substitui o anterior", async () => {
-    const { bot, store, messenger } = await setup();
+  it("aprovar agenda na próxima sexta livre; o seguinte vai para a sexta depois", async () => {
+    const { bot, store, messenger } = await setup(); // sexta, 06/11, 11h
     await bot.handleUpdate(msg("/carrossel tema A"));
     await bot.handleUpdate(click("ca:1"));
-    expect(store.carousels[0].status).toBe("approved");
+    expect(store.carousels[0]).toMatchObject({ status: "approved", scheduled_for: "2026-11-06" });
+    expect(messenger.edits.at(-1)?.html).toContain("Agendado: hoje (sexta) às 18h");
+
+    await bot.handleUpdate(msg("/carrossel tema B"));
+    expect(messenger.lastCard()!.html).toContain("Aprovando, ele é publicado sexta, 13/11, às 18h.");
+    await bot.handleUpdate(click("ca:2"));
+    await bot.handleUpdate(msg("/carrossel tema C"));
+    await bot.handleUpdate(click("ca:3"));
+    expect(store.carousels.map((c) => [c.status, c.scheduled_for])).toEqual([
+      ["approved", "2026-11-06"],
+      ["approved", "2026-11-13"],
+      ["approved", "2026-11-20"],
+    ]);
+    expect(messenger.edits.at(-1)?.html).toContain("Já há 2 carrosséis na fila antes dele");
+
+    await bot.handleUpdate(msg("/agenda"));
+    expect(messenger.last().html).toContain("hoje (sexta) às 18h — Versão 1");
+    expect(messenger.last().html).toContain("sexta, 20/11, às 18h — Versão 3");
+  });
+
+  it("descartar um agendado libera a sexta dele para o próximo", async () => {
+    const { bot, store } = await setup();
+    await bot.handleUpdate(msg("/carrossel tema A"));
+    await bot.handleUpdate(click("ca:1"));
     await bot.handleUpdate(msg("/carrossel tema B"));
     await bot.handleUpdate(click("ca:2"));
-    expect(store.carousels.map((c) => c.status)).toEqual(["discarded", "approved"]);
-    expect(messenger.edits.at(-1)?.html).toContain("substitui");
+    await bot.handleUpdate(click("cx:1"));
+    await bot.handleUpdate(msg("/carrossel tema C"));
+    await bot.handleUpdate(click("ca:3"));
+    expect(store.carousels[2].scheduled_for).toBe("2026-11-06");
   });
 
   it("ajustar manda a versão atual e o pedido para o Claude", async () => {
@@ -365,12 +390,36 @@ describe("agenda das 18h", () => {
     return { ...ctx, bot };
   }
 
-  it("sexta publica o carrossel aprovado", async () => {
-    const ctx = await at("2026-11-06T21:00:00Z");
-    await ctx.bot.handleUpdate(msg("/carrossel tema A"));
-    await ctx.bot.handleUpdate(click("ca:1"));
-    await ctx.bot.runScheduled();
-    expect(ctx.linkedin.published).toHaveLength(1);
+  it("sexta publica só o carrossel da vez; os outros esperam a sexta deles", async () => {
+    let now = new Date("2026-11-06T14:00:00Z"); // sexta, 11h
+    const ctx = makeDeps({ now: () => now });
+    const bot = new Bot(ctx.deps, perfil);
+    await bot.handleUpdate(msg("/start"));
+    for (const [i, t] of ["A", "B"].entries()) {
+      await bot.handleUpdate(msg(`/carrossel tema ${t}`));
+      await bot.handleUpdate(click(`ca:${i + 1}`));
+    }
+    now = new Date("2026-11-06T21:00:00Z");
+    await bot.runScheduled();
+    expect(ctx.linkedin.published.map((p) => p.title)).toEqual(["Versão 1"]);
+    expect(ctx.store.carousels[1].status).toBe("approved");
+
+    now = new Date("2026-11-13T21:00:00Z");
+    await bot.runScheduled();
+    expect(ctx.linkedin.published.map((p) => p.title)).toEqual(["Versão 1", "Versão 2"]);
+  });
+
+  it("sexta sem carrossel da vez avisa quando sai o próximo", async () => {
+    let now = new Date("2026-11-06T22:00:00Z"); // sexta, depois das 18h
+    const ctx = makeDeps({ now: () => now });
+    const bot = new Bot(ctx.deps, perfil);
+    await bot.handleUpdate(msg("/start"));
+    await bot.handleUpdate(msg("/carrossel tema A"));
+    await bot.handleUpdate(click("ca:1")); // vai para 13/11
+    now = new Date("2026-11-06T21:00:00Z");
+    await bot.publishCarousel();
+    expect(ctx.linkedin.published).toHaveLength(0);
+    expect(ctx.messenger.last().html).toContain("O próximo sai sexta, 13/11, às 18h.");
   });
 
   it("quinta lembra do carrossel quando não há nenhum aprovado", async () => {
@@ -395,6 +444,7 @@ describe("nextPublishLabel", () => {
     expect(nextPublishLabel(new Date("2026-11-06T20:59:00Z"))).toBe("hoje (sexta) às 18h");
     expect(nextPublishLabel(new Date("2026-11-06T21:00:00Z"))).toBe("sexta, 13/11, às 18h");
     expect(nextPublishLabel(new Date("2026-11-04T12:00:00Z"))).toBe("sexta, 06/11, às 18h");
+    expect(nextPublishLabel(new Date("2026-11-04T12:00:00Z"), ["2026-11-06", "2026-11-13"])).toBe("sexta, 20/11, às 18h");
   });
 });
 
