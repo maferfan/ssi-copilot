@@ -3,6 +3,8 @@ import { Bot } from "./bot";
 import { BrowserRenderer } from "./carousel";
 import { ClaudeDrafter } from "./claude";
 import { CRONS } from "./crons";
+import { hmacHex, safeEqual } from "./crypto";
+import { invitesPageHtml, messagePageHtml } from "./invites-page";
 import { dashboardHtml, loadDashboard } from "./dashboard";
 import { fetchPreview } from "./linkedin";
 import { LinkedInGateway } from "./linkedin-api";
@@ -30,6 +32,12 @@ function makeLinkedIn(env: Env, store: D1Store) {
   });
 }
 
+/** Chave dos links privados (página dos convites). */
+function signer(env: Env) {
+  const key = `links:${env.TOKEN_ENCRYPTION_KEY ?? env.TELEGRAM_BOT_TOKEN}`;
+  return (payload: string) => hmacHex(key, payload);
+}
+
 /** `web`: chamado pelo webhook, onde trabalhos longos vão para a fila. */
 function makeBot(env: Env, web = false) {
   const store = new D1Store(env.DB);
@@ -45,6 +53,7 @@ function makeBot(env: Env, web = false) {
       now,
       ownerChatId: env.OWNER_CHAT_ID ? Number(env.OWNER_CHAT_ID) : undefined,
       defer: web ? (job) => store.enqueueJob(job, now().toISOString()) : undefined,
+      sign: signer(env),
     },
     perfil,
   );
@@ -55,6 +64,23 @@ function page(title: string, text: string, status = 200) {
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0d0d0e;color:#ece7de;font:18px/1.5 system-ui,sans-serif;padding:24px;text-align:center}h1{font-family:Georgia,serif;font-style:italic;font-weight:400}</style></head>
 <body><main><h1>${title}</h1><p>${text}</p></main></body></html>`;
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } });
+}
+
+const JOB_LABEL: Record<string, string> = {
+  daily: "Gerar as sugestões de comentário",
+  invites: "A lista de recrutadores",
+  carousel: "Montar o carrossel",
+};
+
+/** Roda algo agendado e, se der erro, avisa no Telegram em vez de só gravar no log. */
+async function guarded(env: Env, what: string, run: (bot: ReturnType<typeof makeBot>) => Promise<void>) {
+  const bot = makeBot(env);
+  try {
+    await run(bot);
+  } catch (err) {
+    console.error(what, err);
+    await bot.reportFailure(what, err).catch(() => {});
+  }
 }
 
 async function runQueue(env: Env) {
@@ -69,6 +95,7 @@ async function runQueue(env: Env) {
     } catch (err) {
       console.error("trabalho falhou", job.kind, err);
       await store.finishJob(id, false);
+      await bot.reportFailure(JOB_LABEL[job.kind], err).catch(() => {});
     }
   }
 }
@@ -119,6 +146,27 @@ export default {
       });
     }
 
+    // Página de um bloco de recrutadores: abre os perfis em abas (link assinado, só o dono tem)
+    if (url.pathname === "/convites" && (request.method === "GET" || request.method === "POST")) {
+      const params = request.method === "POST" ? new URLSearchParams(await request.text()) : url.searchParams;
+      const week = params.get("w") ?? "";
+      const batch = Number(params.get("b"));
+      const token = params.get("t") ?? "";
+      const expected = await signer(env)(`invites:${week}:${batch}`);
+      const headers = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer" };
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(week) || !Number.isInteger(batch) || !safeEqual(token, expected)) {
+        return new Response(messagePageHtml("Link inválido", "Abra a página pelo botão do bloco no Telegram."), { status: 403, headers });
+      }
+      if (request.method === "POST") {
+        const n = await makeBot(env).registerInvitesFromPage(week, batch);
+        const text = n > 0 ? `${n} convites registrados. Pode fechar esta página.` : "Este bloco já estava registrado.";
+        return new Response(messagePageHtml("Pronto ✔", text), { headers });
+      }
+      const rows = await new D1Store(env.DB).listRecruiterBatch(week, batch);
+      if (rows.length === 0) return new Response(messagePageHtml("Bloco não encontrado", "Esse bloco não existe mais."), { status: 404, headers });
+      return new Response(invitesPageHtml(rows, week, batch, token), { headers });
+    }
+
     // Chamado pelo deploy para registrar o webhook. Exige o mesmo segredo.
     if (request.method === "POST" && url.pathname === "/setup") {
       if (request.headers.get("authorization") !== `Bearer ${secret}`) {
@@ -137,7 +185,7 @@ export default {
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     // 21:00 UTC = 18:00 em Brasília
     if (controller.cron === CRONS.daily) {
-      ctx.waitUntil(makeBot(env).runScheduled());
+      ctx.waitUntil(guarded(env, "A rodada das 18h", (bot) => bot.runScheduled()));
     }
     // A cada minuto: roda os trabalhos longos pedidos pelo Telegram (até 15 min aqui, contra ~30 s no webhook)
     if (controller.cron === CRONS.queue) {
@@ -145,7 +193,7 @@ export default {
     }
     // 11:00 UTC de domingo = 8h em Brasília: lista de recrutadores
     if (controller.cron === CRONS.recruiters) {
-      ctx.waitUntil(makeBot(env).runInvites());
+      ctx.waitUntil(guarded(env, "A lista de recrutadores de domingo", (bot) => bot.runInvites()));
     }
   },
 } satisfies ExportedHandler<Env>;

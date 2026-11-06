@@ -117,9 +117,11 @@ export interface Store {
   countActionsSince(sinceIso: string): Promise<Record<string, number>>;
 }
 
+/** Botão do Telegram: `data` volta para o bot quando tocado; `url` abre um link. */
 export interface InlineButton {
   text: string;
-  data: string;
+  data?: string;
+  url?: string;
 }
 
 export interface Messenger {
@@ -185,4 +187,6 @@ export interface Deps {
    * Sem isto (cron e testes), rodam na hora.
    */
   defer?: (job: Job) => Promise<void>;
+  /** Assina links privados (página dos convites). Sem isto, o botão do link não aparece. */
+  sign?: (payload: string) => Promise<string>;
 }

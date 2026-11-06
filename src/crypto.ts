@@ -33,3 +33,18 @@ export async function decrypt(sealed: string, secret: string): Promise<string> {
 export function randomHex(bytes = 16): string {
   return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+/** Assinatura HMAC-SHA256 (hex) para links que só o dono pode usar. */
+export async function hmacHex(secret: string, payload: string): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)));
+  return [...sig].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 40);
+}
+
+/** Comparação em tempo constante, para não vazar a assinatura pelo tempo de resposta. */
+export function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
