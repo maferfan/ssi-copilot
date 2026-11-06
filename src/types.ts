@@ -52,6 +52,33 @@ export interface WeeklyMetrics {
   followers: number;
 }
 
+/** Perfil encontrado na busca, antes de ir para o banco. */
+export interface RecruiterCandidate {
+  name: string;
+  headline: string;
+  url: string;
+  language: "pt" | "en" | "other";
+}
+
+export interface Recruiter {
+  id: number;
+  url: string;
+  name: string;
+  headline: string | null;
+  language: "pt" | "en";
+  note: string | null;
+  week: string;
+  batch: number;
+  status: "suggested" | "invited";
+  created_at: string;
+}
+
+/** Trabalho longo que o webhook deixa para o cron de cada minuto. */
+export type Job =
+  | { kind: "daily" }
+  | { kind: "invites" }
+  | { kind: "carousel"; chatId: number; topic: string; previousId?: number; instructions?: string };
+
 export type ActionType = "comment" | "post" | "invite" | "ssi";
 
 /** O que o bot está esperando como próxima mensagem de texto. */
@@ -77,6 +104,15 @@ export interface Store {
   /** Semanas a partir de `sinceWeek`, em ordem. */
   listMetrics(sinceWeek: string): Promise<WeeklyMetrics[]>;
   listActionsSince(sinceIso: string): Promise<{ type: ActionType; created_at: string }[]>;
+  /** Todos os perfis já sugeridos, para não repetir. */
+  knownRecruiterUrls(): Promise<string[]>;
+  addRecruiters(rows: Omit<Recruiter, "id" | "status">[]): Promise<void>;
+  listRecruiterBatch(week: string, batch: number): Promise<Recruiter[]>;
+  markRecruitersInvited(ids: number[]): Promise<void>;
+  enqueueJob(job: Job, createdAt: string): Promise<void>;
+  /** Pega os trabalhos pendentes e marca como "running" (cada um roda uma vez só). */
+  takeJobs(limit: number): Promise<{ id: number; job: Job }[]>;
+  finishJob(id: number, ok: boolean): Promise<void>;
   logAction(type: ActionType, refId: number | null, createdAt: string, value?: number | null): Promise<void>;
   countActionsSince(sinceIso: string): Promise<Record<string, number>>;
 }
@@ -100,6 +136,8 @@ export interface Drafter {
   draftComment(post: Pick<Post, "url" | "author" | "text">, avoid: string[]): Promise<string>;
   /** Escreve um carrossel; com `previous` + `instructions`, ajusta uma versão anterior. */
   draftCarousel(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent>;
+  /** Busca na web perfis públicos de recrutadores no LinkedIn, ignorando os de `exclude`. */
+  findRecruiters(exclude: string[], want: number): Promise<RecruiterCandidate[]>;
 }
 
 export interface RenderedCarousel {
@@ -142,4 +180,9 @@ export interface Deps {
   now: () => Date;
   /** Chat liberado por configuração; se vazio, o primeiro /start vira dono. */
   ownerChatId?: number;
+  /**
+   * No webhook, trabalhos longos vão para a fila (o Worker só tem ~30 s ali).
+   * Sem isto (cron e testes), rodam na hora.
+   */
+  defer?: (job: Job) => Promise<void>;
 }

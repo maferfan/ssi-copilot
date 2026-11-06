@@ -3,9 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 
-# 21:00 UTC = 18:00 em Brasília: comentários todo dia, lembrete na quinta, carrossel na sexta
+# 21:00 UTC = 18:00 em Brasília: comentários todo dia, lembrete na quinta, carrossel na sexta, resumo no domingo
+# 11:00 UTC de domingo = 8h em Brasília: lista de recrutadores
+# A cada minuto: fila de trabalhos longos pedidos pelo Telegram (carrossel, recrutadores, /agora)
 [triggers]
-crons = ["0 21 * * *"]
+crons = ["0 21 * * *", "0 11 * * 0", "* * * * *"]
 
 [[d1_databases]]
 binding = "DB"

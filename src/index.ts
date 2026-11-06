@@ -29,8 +29,10 @@ function makeLinkedIn(env: Env, store: D1Store) {
   });
 }
 
-function makeBot(env: Env) {
+/** `web`: chamado pelo webhook, onde trabalhos longos vão para a fila. */
+function makeBot(env: Env, web = false) {
   const store = new D1Store(env.DB);
+  const now = () => new Date();
   return new Bot(
     {
       store,
@@ -39,8 +41,9 @@ function makeBot(env: Env) {
       renderer: new BrowserRenderer(env.BROWSER),
       linkedin: makeLinkedIn(env, store),
       fetchPreview,
-      now: () => new Date(),
+      now,
       ownerChatId: env.OWNER_CHAT_ID ? Number(env.OWNER_CHAT_ID) : undefined,
+      defer: web ? (job) => store.enqueueJob(job, now().toISOString()) : undefined,
     },
     perfil,
   );
@@ -51,6 +54,22 @@ function page(title: string, text: string, status = 200) {
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0d0d0e;color:#ece7de;font:18px/1.5 system-ui,sans-serif;padding:24px;text-align:center}h1{font-family:Georgia,serif;font-style:italic;font-weight:400}</style></head>
 <body><main><h1>${title}</h1><p>${text}</p></main></body></html>`;
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } });
+}
+
+async function runQueue(env: Env) {
+  const store = new D1Store(env.DB);
+  const jobs = await store.takeJobs(3);
+  if (jobs.length === 0) return;
+  const bot = makeBot(env);
+  for (const { id, job } of jobs) {
+    try {
+      await bot.runJob(job);
+      await store.finishJob(id, true);
+    } catch (err) {
+      console.error("trabalho falhou", job.kind, err);
+      await store.finishJob(id, false);
+    }
+  }
 }
 
 export default {
@@ -66,7 +85,7 @@ export default {
       const update = (await request.json()) as TgUpdate;
       // Responde já e processa em segundo plano: o Telegram não reenvia a mensagem
       ctx.waitUntil(
-        makeBot(env)
+        makeBot(env, true)
           .handleUpdate(update)
           .catch((err) => console.error("update falhou", err)),
       );
@@ -118,6 +137,14 @@ export default {
     // 21:00 UTC = 18:00 em Brasília
     if (controller.cron === "0 21 * * *") {
       ctx.waitUntil(makeBot(env).runScheduled());
+    }
+    // A cada minuto: roda os trabalhos longos pedidos pelo Telegram (até 15 min aqui, contra ~30 s no webhook)
+    if (controller.cron === "* * * * *") {
+      ctx.waitUntil(runQueue(env));
+    }
+    // 11:00 UTC de domingo = 8h em Brasília: lista de recrutadores
+    if (controller.cron === "0 11 * * 0") {
+      ctx.waitUntil(makeBot(env).runInvites());
     }
   },
 } satisfies ExportedHandler<Env>;
