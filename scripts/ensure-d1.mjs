@@ -6,12 +6,17 @@ import { readFileSync, writeFileSync } from "node:fs";
 const NAME = "ssi-copilot";
 const wrangler = (...args) => execFileSync("npx", ["wrangler", ...args], { encoding: "utf8" });
 
-const list = JSON.parse(wrangler("d1", "list", "--json"));
-let db = list.find((d) => d.name === NAME);
+// Lê só o JSON da saída, ignorando avisos que o wrangler possa imprimir antes
+const listDbs = () => {
+  const out = wrangler("d1", "list", "--json");
+  return JSON.parse(out.slice(out.indexOf("[")));
+};
+
+let db = listDbs().find((d) => d.name === NAME);
 if (!db) {
   console.log(`Criando o banco D1 "${NAME}"...`);
-  wrangler("d1", "create", NAME);
-  db = JSON.parse(wrangler("d1", "list", "--json")).find((d) => d.name === NAME);
+  wrangler("d1", "create", NAME, "--update-config=false");
+  db = listDbs().find((d) => d.name === NAME);
 }
 if (!db?.uuid) throw new Error("Não encontrei o id do banco D1");
 
