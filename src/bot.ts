@@ -1,3 +1,4 @@
+import { detectLanguage } from "./language";
 import { extractLinkedInUrl, extractPostUrn, textAroundUrl } from "./linkedin";
 import type { Perfil } from "./perfil";
 import type { TgUpdate } from "./telegram";
@@ -65,7 +66,7 @@ export function draftCard(post: Post, index?: { i: number; total: number }): str
 <i>${esc(excerpt(post.text))}</i>
 🔗 ${esc(post.url)}
 
-💬 <b>Sugestão:</b>
+💬 <b>Sugestão${detectLanguage(post.text) === "en" ? " (em inglês 🇺🇸)" : ""}:</b>
 ${esc(post.draft ?? "")}`;
 }
 

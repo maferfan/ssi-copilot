@@ -18,7 +18,7 @@ export const perfil = {
     "Nada de 'Ótimo post!', 'Concordo totalmente' ou elogio vazio.",
     "Sem hashtags, sem links, no máximo um emoji (de preferência nenhum).",
     "Não inventar números, empresas ou experiências que o post não sustenta: se citar vivência, que seja genérica e plausível para um dev web.",
-    "Responder no idioma do post (português ou inglês).",
+    "Escrever no mesmo idioma do post: post em inglês recebe comentário em inglês; em português, português do Brasil.",
   ],
   /** Exemplos de comentários seus. Quanto mais, melhor o tom. */
   exemplos: [] as string[],
