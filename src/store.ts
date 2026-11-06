@@ -1,4 +1,10 @@
-import type { ActionType, Post, PostStatus, Store } from "./types";
+import type { ActionType, Carousel, CarouselContent, CarouselStatus, Post, PostStatus, Store } from "./types";
+
+interface CarouselRow extends Omit<Carousel, "content"> {
+  content: string;
+}
+
+const toCarousel = (r: CarouselRow): Carousel => ({ ...r, content: JSON.parse(r.content) as CarouselContent });
 
 /** Implementação do Store em cima do Cloudflare D1. */
 export class D1Store implements Store {
@@ -20,10 +26,10 @@ export class D1Store implements Store {
       .run();
   }
 
-  async addPost(p: { url: string; author: string | null; text: string | null; status: PostStatus; createdAt: string }) {
+  async addPost(p: { url: string; urn: string | null; author: string | null; text: string | null; status: PostStatus; createdAt: string }) {
     const row = await this.db
-      .prepare("INSERT INTO posts (url, author, text, status, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id")
-      .bind(p.url, p.author, p.text, p.status, p.createdAt)
+      .prepare("INSERT INTO posts (url, urn, author, text, status, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id")
+      .bind(p.url, p.urn, p.author, p.text, p.status, p.createdAt)
       .first<{ id: number }>();
     if (!row) throw new Error("Falha ao salvar o post");
     return row.id;
@@ -50,6 +56,38 @@ export class D1Store implements Store {
       .bind(...statuses, limit)
       .all<Post>();
     return results;
+  }
+
+  async addCarousel(c: { topic: string; content: CarouselContent; createdAt: string }) {
+    const row = await this.db
+      .prepare("INSERT INTO carousels (topic, content, status, created_at) VALUES (?, ?, 'draft', ?) RETURNING id")
+      .bind(c.topic, JSON.stringify(c.content), c.createdAt)
+      .first<{ id: number }>();
+    if (!row) throw new Error("Falha ao salvar o carrossel");
+    return row.id;
+  }
+
+  async getCarousel(id: number) {
+    const row = await this.db.prepare("SELECT * FROM carousels WHERE id = ?").bind(id).first<CarouselRow>();
+    return row ? toCarousel(row) : null;
+  }
+
+  async updateCarousel(id: number, patch: Partial<Pick<Carousel, "status" | "published_at">>) {
+    const keys = Object.keys(patch) as (keyof typeof patch)[];
+    if (keys.length === 0) return;
+    await this.db
+      .prepare(`UPDATE carousels SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`)
+      .bind(...keys.map((k) => patch[k] ?? null), id)
+      .run();
+  }
+
+  async listCarousels(statuses: CarouselStatus[]) {
+    const marks = statuses.map(() => "?").join(", ");
+    const { results } = await this.db
+      .prepare(`SELECT * FROM carousels WHERE status IN (${marks}) ORDER BY created_at, id`)
+      .bind(...statuses)
+      .all<CarouselRow>();
+    return results.map(toCarousel);
   }
 
   async logAction(type: ActionType, refId: number | null, createdAt: string, value: number | null = null) {

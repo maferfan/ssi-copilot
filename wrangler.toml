@@ -3,7 +3,7 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 
-# 21:00 UTC = 18:00 em Brasília (todo dia)
+# 21:00 UTC = 18:00 em Brasília: comentários todo dia, lembrete na quinta, carrossel na sexta
 [triggers]
 crons = ["0 21 * * *"]
 
@@ -13,6 +13,10 @@ database_name = "ssi-copilot"
 # Preenchido automaticamente pelo deploy (scripts/ensure-d1.mjs)
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
+
+# Navegador da Cloudflare (Browser Run) que gera o PDF do carrossel
+[browser]
+binding = "BROWSER"
 
 [observability]
 enabled = true
