@@ -1,4 +1,4 @@
-import type { ActionType, Carousel, CarouselContent, CarouselStatus, Job, Post, PostStatus, Recruiter, Store, WeeklyMetrics } from "./types";
+import type { ActionType, Carousel, CarouselContent, CarouselStatus, Job, Post, PostStatus, Store, WeeklyMetrics } from "./types";
 
 interface CarouselRow extends Omit<Carousel, "content"> {
   content: string;
@@ -111,37 +111,10 @@ export class D1Store implements Store {
 
   async listActionsSince(sinceIso: string) {
     const { results } = await this.db
-      .prepare("SELECT type, created_at FROM actions WHERE created_at >= ? ORDER BY created_at")
+      .prepare("SELECT type, created_at, value FROM actions WHERE created_at >= ? ORDER BY created_at")
       .bind(sinceIso)
-      .all<{ type: ActionType; created_at: string }>();
+      .all<{ type: ActionType; created_at: string; value: number | null }>();
     return results;
-  }
-
-  async knownRecruiterUrls() {
-    const { results } = await this.db.prepare("SELECT url FROM recruiters").all<{ url: string }>();
-    return results.map((r) => r.url);
-  }
-
-  async addRecruiters(rows: Omit<Recruiter, "id" | "status">[]) {
-    if (rows.length === 0) return;
-    const stmt = this.db.prepare(
-      "INSERT OR IGNORE INTO recruiters (url, name, headline, language, note, week, batch, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'suggested', ?)",
-    );
-    await this.db.batch(rows.map((r) => stmt.bind(r.url, r.name, r.headline, r.language, r.note, r.week, r.batch, r.created_at)));
-  }
-
-  async listRecruiterBatch(week: string, batch: number) {
-    const { results } = await this.db
-      .prepare("SELECT * FROM recruiters WHERE week = ? AND batch = ? ORDER BY id")
-      .bind(week, batch)
-      .all<Recruiter>();
-    return results;
-  }
-
-  async markRecruitersInvited(ids: number[]) {
-    if (ids.length === 0) return;
-    const stmt = this.db.prepare("UPDATE recruiters SET status = 'invited' WHERE id = ?");
-    await this.db.batch(ids.map((id) => stmt.bind(id)));
   }
 
   async enqueueJob(job: Job, createdAt: string) {
