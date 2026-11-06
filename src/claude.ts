@@ -134,10 +134,10 @@ Goal: ${p.objetivo}
 
 What a good carousel looks like:
 - The cover promises a concrete takeaway. Short title (up to 8 words), one-line subtitle.
-- 4 to 6 content slides, one idea each. Title up to 7 words, text up to 28 words (each slide also carries a chart).
-- Every content slide has a chart:
-  - mode "research": use a research item that fits (by its id). Its numbers are inserted automatically; do not repeat them in "dados".
-  - mode "illustrative": only when no research item fits. Use a conceptual comparison with obviously relative values (e.g. effort vs impact on a 1-10 scale). It is labelled "Illustrative" on the slide. Never present illustrative values as facts in the text.
+- 4 to 6 content slides, one idea each. Title up to 7 words. Text up to 40 words, or up to 28 words on a slide with a chart.
+- The carousel has 1 to 3 charts in total, on the slides where data makes the point stronger. Every other slide uses mode "none" (text only).
+  - mode "research": use a research item that fits (by its id). Its numbers are inserted automatically; do not repeat them in "dados". Prefer this whenever a research item fits.
+  - mode "illustrative": only if no research item fits any slide, so the carousel still has a chart. Use a conceptual comparison with obviously relative values (e.g. effort vs impact on a 1-10 scale). It is labelled "Illustrative" on the slide. Never present illustrative values as facts in the text.
 - Only state numbers in the text that come from a research item you are using on that slide.
 - The last slide wraps up and invites people to comment or follow.
 - Highlight at most one phrase per slide with **double asterisks**.
@@ -150,14 +150,14 @@ const CHART_SCHEMA = {
   additionalProperties: false,
   required: ["modo", "id_pesquisa", "tipo", "titulo", "unidade", "dados"],
   properties: {
-    modo: { type: "string", enum: ["research", "illustrative"] },
-    id_pesquisa: { type: "string", description: "Research item id (mode research); empty for illustrative" },
+    modo: { type: "string", enum: ["research", "illustrative", "none"], description: "none = text-only slide" },
+    id_pesquisa: { type: "string", description: "Research item id (mode research); empty otherwise" },
     tipo: { type: "string", enum: ["bar", "line"] },
     titulo: { type: "string", description: "Short chart title" },
     unidade: { type: "string", description: "Unit, e.g. % or ms; empty if none" },
     dados: {
       type: "array",
-      description: "Only for illustrative charts (2 to 6 points); empty for research",
+      description: "Only for illustrative charts (2 to 6 points); empty otherwise",
       items: {
         type: "object",
         additionalProperties: false,
@@ -177,7 +177,7 @@ const CAROUSEL_SCHEMA = {
     subtitulo: { type: "string", description: "One line under the cover title" },
     slides: {
       type: "array",
-      description: "4 to 6 content slides, each with a chart",
+      description: "4 to 6 content slides; 1 to 3 of them with a chart",
       items: {
         type: "object",
         additionalProperties: false,
@@ -196,7 +196,7 @@ const CAROUSEL_SCHEMA = {
 } as const;
 
 interface DraftChart {
-  modo: "research" | "illustrative";
+  modo: "research" | "illustrative" | "none";
   id_pesquisa: string;
   tipo: "bar" | "line";
   titulo: string;
@@ -206,7 +206,7 @@ interface DraftChart {
 
 /** Monta o gráfico final: com fonte, os números saem da pesquisa conferida; senão, vira ilustrativo. */
 export function buildChart(d: DraftChart | undefined, research: ResearchItem[]): CarouselChart | undefined {
-  if (!d) return undefined;
+  if (!d || d.modo === "none") return undefined;
   const item = d.modo === "research" ? research.find((r) => r.id === d.id_pesquisa) : undefined;
   if (item) {
     return {
@@ -220,6 +220,22 @@ export function buildChart(d: DraftChart | undefined, research: ResearchItem[]):
   }
   if (!Array.isArray(d.dados) || d.dados.length < 2) return undefined;
   return { tipo: d.tipo, titulo: d.titulo, unidade: d.unidade, dados: d.dados, fonte: null, ilustrativo: true };
+}
+
+/** No máximo 3 gráficos, e pelo menos 1 quando houver pesquisa: todo carrossel tem gráfico. */
+export function ensureCharts(slides: { titulo: string; texto: string; grafico?: CarouselChart }[], research: ResearchItem[]) {
+  let count = 0;
+  const out = slides.map((s) => {
+    if (!s.grafico) return s;
+    if (count >= 3) return { titulo: s.titulo, texto: s.texto };
+    count++;
+    return s;
+  });
+  if (count === 0 && research.length && out.length) {
+    const first = research[0];
+    out[0] = { ...out[0], grafico: buildChart({ modo: "research", id_pesquisa: first.id, tipo: first.tipo, titulo: first.achado, unidade: "", dados: [] }, research) };
+  }
+  return out;
 }
 
 /** Pesquisa já conferida de uma versão anterior, para ajustes não pagarem nova busca. */
@@ -331,7 +347,10 @@ export class ClaudeDrafter implements Drafter {
     });
     return normalizeCarousel({
       ...draft,
-      slides: draft.slides.map((s) => ({ titulo: s.titulo, texto: s.texto, grafico: buildChart(s.grafico, research.items) })),
+      slides: ensureCharts(
+        draft.slides.map((s) => ({ titulo: s.titulo, texto: s.texto, grafico: buildChart(s.grafico, research.items) })),
+        research.items,
+      ),
       custo,
     });
   }

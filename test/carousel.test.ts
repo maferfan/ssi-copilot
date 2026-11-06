@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { carouselHtml, fmtValue, normalizeCarousel } from "../src/carousel";
 import {
   buildChart,
+  ensureCharts,
   carouselSystemPrompt,
   carouselUserPrompt,
   costOf,
@@ -75,6 +76,22 @@ describe("gráficos", () => {
     expect(g).toMatchObject({ ilustrativo: true, fonte: null });
   });
 
+  it('modo "none" deixa o slide só com texto', () => {
+    expect(buildChart({ modo: "none", id_pesquisa: "", tipo: "bar", titulo: "", unidade: "", dados: [] }, [item()])).toBeUndefined();
+  });
+
+  it("todo carrossel tem gráfico: sem nenhum, o primeiro dado conferido vai para o primeiro slide", () => {
+    const slides = ensureCharts([{ titulo: "A", texto: "" }, { titulo: "B", texto: "" }], [item()]);
+    expect(slides[0].grafico?.fonte?.nome).toBe("Stack Overflow Developer Survey");
+    expect(slides[1].grafico).toBeUndefined();
+  });
+
+  it("no máximo 3 gráficos por carrossel", () => {
+    const g = buildChart({ modo: "research", id_pesquisa: "R1", tipo: "bar", titulo: "", unidade: "", dados: [] }, [item()]);
+    const slides = ensureCharts(Array.from({ length: 5 }, (_, i) => ({ titulo: `S${i}`, texto: "", grafico: g })), [item()]);
+    expect(slides.filter((s) => s.grafico)).toHaveLength(3);
+  });
+
   it("ajuste reaproveita as fontes já conferidas sem nova busca", () => {
     const c = normalizeCarousel({
       ...sampleCarousel(),
@@ -129,10 +146,10 @@ describe("slides", () => {
 });
 
 describe("prompts e custo", () => {
-  it("escreve em inglês e exige gráfico em todo slide de conteúdo", () => {
+  it("escreve em inglês, com 1 a 3 gráficos por carrossel", () => {
     const sys = carouselSystemPrompt(perfil);
     expect(sys).toContain("always in English");
-    expect(sys).toContain("Every content slide has a chart");
+    expect(sys).toContain("1 to 3 charts in total");
     expect(carouselUserPrompt("web perf", [])).toContain("use illustrative charts only");
     expect(carouselUserPrompt("web perf", [item()])).toContain('"id": "R1"');
   });

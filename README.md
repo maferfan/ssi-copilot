@@ -47,7 +47,7 @@ Nada é publicado ou enviado no LinkedIn sem eu ver antes. Isso respeita os term
 
 **Carrossel de sexta**
 1. `/carrossel how to choose a website stack`: o Claude **pesquisa na web** dados sobre o tema e escreve o carrossel **em inglês**: capa, 4 a 6 slides, um slide de fontes, fechamento e legenda.
-2. **Todo slide de conteúdo tem um gráfico.** Com dado de pesquisa, o gráfico leva a fonte ("Source: …, 2025") e a fonte entra no slide de referências. Sem dado confiável, o gráfico sai marcado como **"Illustrative data, not a measurement"**.
+2. **Todo carrossel tem de 1 a 3 gráficos**, nos slides em que o dado reforça a ideia; os outros são só texto. Com dado de pesquisa, o gráfico leva a fonte ("Source: …, 2025") e a fonte entra no slide de referências. Sem dado confiável, o gráfico sai marcado como **"Illustrative data, not a measurement"**.
 3. Chegam as imagens dos slides e o cartão com as fontes, o custo daquele carrossel (tokens, buscas e US$) e os botões **✅ Aprovar · 🔄 Refazer · ✏️ Ajustar · ❌ Descartar**. Ajustar reaproveita a pesquisa (sem novo custo de busca); Refazer pesquisa de novo.
 4. Aprovado, ele entra na **próxima sexta livre**, às 18h. Se a próxima sexta já tem um, vai para a seguinte, e assim por diante. `/agenda` mostra a fila; descartar um agendado libera a sexta dele.
 5. Na quinta, se não houver carrossel para o dia seguinte, o bot pergunta o tema. Se a publicação falhar, manda o PDF e a legenda para postar à mão.
@@ -127,7 +127,7 @@ flowchart LR
 | **TypeScript** | Linguagem | Tipos pegam erros antes do deploy (ex.: um status de post que não existe) | JavaScript puro |
 | **Wrangler** | CLI da Cloudflare | Publica o Worker, aplica migrações e grava segredos; o `wrangler.toml` descreve tudo em texto | Configurar à mão no painel |
 | **GitHub Actions** | CI e deploy | Testa cada pull request e publica cada push na `main`, sem instalar nada no computador | Deploy manual |
-| **Vitest** | Testes | Rápido, roda TypeScript direto; 118 testes em cerca de 1 segundo | Jest |
+| **Vitest** | Testes | Rápido, roda TypeScript direto; 121 testes em cerca de 1 segundo | Jest |
 
 ### Técnicas de engenharia
 
