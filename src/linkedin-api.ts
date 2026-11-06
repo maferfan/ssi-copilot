@@ -139,14 +139,30 @@ export class LinkedInGateway implements LinkedIn {
 
   // ---------- comentar ----------
 
+  /**
+   * A API nova (/rest) só libera comentários para apps com o produto Community Management.
+   * Se ela negar, tenta a API antiga (/v2), que alguns apps com w_member_social ainda podem usar.
+   */
   async comment(postUrn: string, text: string): Promise<void> {
     const { token, person } = await this.auth();
-    await this.rest(
-      token,
-      `socialActions/${encodeURIComponent(postUrn)}/comments`,
-      { method: "POST", body: { actor: person, object: postUrn, message: { text } } },
-      "comentário",
-    );
+    const path = `socialActions/${encodeURIComponent(postUrn)}/comments`;
+    try {
+      await this.rest(token, path, { method: "POST", body: { actor: person, object: postUrn, message: { text } } }, "comentário");
+      return;
+    } catch (err) {
+      if (!(err instanceof LinkedInApiError) || err.status !== 403) throw err;
+    }
+
+    const res = await this.http(`https://api.linkedin.com/v2/${path}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "x-restli-protocol-version": "2.0.0", "content-type": "application/json" },
+      body: JSON.stringify({ actor: person, message: { text } }),
+    });
+    if (res.ok) return;
+    if (res.status === 403) {
+      throw new Error("o seu app do LinkedIn não tem permissão para comentar pela API (exige o produto Community Management)");
+    }
+    throw new LinkedInApiError(res.status, await res.text(), "comentário");
   }
 
   // ---------- publicar carrossel ----------
