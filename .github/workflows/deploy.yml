@@ -47,7 +47,9 @@ jobs:
       - name: Publicar o Worker
         id: deploy
         run: |
-          npx wrangler deploy | tee deploy.log
+          # pipefail: sem isso o "| tee" esconde um erro do wrangler (ex.: cron recusado)
+          set -o pipefail
+          npx wrangler deploy 2>&1 | tee deploy.log
           url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
           if [ -z "$url" ]; then
             echo "::error::Não achei a URL do Worker. Ative o subdomínio workers.dev em Workers & Pages no painel da Cloudflare."
