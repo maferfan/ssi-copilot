@@ -142,7 +142,7 @@ What a good carousel looks like:
 - Only state numbers in the text that come from a research item you are using on that slide.
 - The last slide wraps up and invites people to comment or follow.
 - Highlight at most one phrase per slide with **double asterisks**.
-- The post caption has 3 to 6 lines: a hook in the first line, why it matters, a question at the end, "Sources in the last slides." and up to 3 hashtags.
+- The post caption has 3 to 6 lines: a hook in the first line, why it matters, a question at the end, "Sources are cited under each chart." and up to 3 hashtags.
 - Practical, specific, no fluff. Tone: ${p.tom.join(" ")}`;
 }
 

@@ -172,7 +172,7 @@ export function carouselCard(c: Carousel, when: string): string {
   const cg = c.content.capa_grafico;
   const cover = cg ? `\nCapa · 📊 ${cg.fonte ? `${esc(cg.fonte.nome)}${cg.fonte.ano ? ` ${esc(cg.fonte.ano)}` : ""}` : "<i>ilustrativo</i>"}` : "\nCapa · ⚠️ <i>sem gráfico</i>";
   const refs = c.content.referencias?.length ?? 0;
-  const sources = refs ? `\n🔗 ${refs === 1 ? "1 fonte conferida" : `${refs} fontes conferidas`}, listadas no slide final.` : "\n⚠️ <i>Nenhuma fonte conferida: todos os gráficos são ilustrativos.</i>";
+  const sources = refs ? `\n🔗 ${refs === 1 ? "1 fonte conferida" : `${refs} fontes conferidas`}, citadas embaixo de cada gráfico.` : "\n⚠️ <i>Nenhuma fonte conferida: todos os gráficos são ilustrativos.</i>";
   const k = c.content.custo;
   const cost = k
     ? `\n💰 ${(k.inputTokens / 1000).toFixed(1)}k tokens de entrada, ${(k.outputTokens / 1000).toFixed(1)}k de saída, ${k.searches} ${k.searches === 1 ? "busca" : "buscas"} ≈ US$ ${k.usd.toFixed(2)}`

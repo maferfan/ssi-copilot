@@ -47,7 +47,7 @@ Nada é publicado ou enviado no LinkedIn sem eu ver antes. Isso respeita os term
 
 **Carrossel de sexta**
 1. `/carrossel how to choose a website stack`: o Claude **pesquisa na web** dados sobre o tema e escreve o carrossel **em inglês**, curto: **de 3 a 5 slides** (capa + 1 a 3 de conteúdo + fechamento), de preferência 3.
-2. **A capa (slide 1) sempre tem um gráfico**: o dado mais forte vira o gancho. No total são até 3 gráficos; os outros slides podem ser só texto. Com dado de pesquisa, o gráfico leva a fonte ("Source: …, 2025") e as fontes aparecem listadas no slide final. Sem dado confiável, o gráfico sai marcado como **"Illustrative data, not a measurement"**.
+2. **A capa (slide 1) sempre tem um gráfico**: o dado mais forte vira o gancho. No total são até 3 gráficos; os outros slides podem ser só texto. Com dado de pesquisa, o gráfico leva a fonte ("Source: …, 2025") embaixo de cada gráfico. Sem dado confiável, o gráfico sai marcado como **"Illustrative data, not a measurement"**.
 3. Chegam as imagens dos slides e o cartão com as fontes, o custo daquele carrossel (tokens, buscas e US$) e os botões **✅ Aprovar · 🔄 Refazer · ✏️ Ajustar · ❌ Descartar**. Ajustar reaproveita a pesquisa (sem novo custo de busca); Refazer pesquisa de novo.
 4. Aprovado, ele entra na **próxima sexta livre**, às 18h. Se a próxima sexta já tem um, vai para a seguinte, e assim por diante. `/agenda` mostra a fila; descartar um agendado libera a sexta dele.
 5. Na quinta, se não houver carrossel para o dia seguinte, o bot pergunta o tema. Se a publicação falhar, manda o PDF e a legenda para postar à mão.

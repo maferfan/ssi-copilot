@@ -127,14 +127,14 @@ describe("slides", () => {
       ],
     });
 
-  it("capa com gráfico, fonte ou selo de ilustrativo, e as fontes no slide final", () => {
+  it("capa com gráfico; a fonte (ou o selo de ilustrativo) fica embaixo de cada gráfico, sem lista no fim", () => {
     const html = carouselHtml(withCharts());
     expect(html).toContain('class="slide cover with-chart"');
     expect(html.match(/<figure class="chart">/g)).toHaveLength(2);
     expect(html).toContain("Source: Stack Overflow Developer Survey (2025) · survey.stackoverflow.co/2025/technology");
     expect(html).toContain("Illustrative data, not a measurement");
-    expect(html).toContain('class="slide closing with-refs"');
-    expect(html).toContain('<div class="closing-refs"><p class="kicker mono">Sources</p>');
+    expect(html).toContain('class="slide closing"');
+    expect(html).not.toContain(">Sources<");
     expect(html.match(/<section class="slide/g)).toHaveLength(3); // capa + 1 + fechamento
     expect(html).toContain("01 / 03");
   });

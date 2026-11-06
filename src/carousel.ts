@@ -160,7 +160,6 @@ function chartBlock(g: CarouselChart): string {
 
 /** HTML com um slide por página, no visual do matheusferrazzadev.com. */
 export function carouselHtml(c: CarouselContent): string {
-  const refs = c.referencias ?? [];
   const total = c.slides.length + 2;
   const num = (i: number) => `${String(i).padStart(2, "0")} / ${String(total).padStart(2, "0")}`;
   const frame = (i: number, body: string, cls = "") => `
@@ -175,12 +174,6 @@ export function carouselHtml(c: CarouselContent): string {
       ? frame(i + 2, `<p class="kicker mono">${String(i + 1).padStart(2, "0")}</p><h2 class="small">${rich(s.titulo)}</h2><p class="text small">${rich(s.texto)}</p>${chartBlock(s.grafico)}`, "with-chart")
       : frame(i + 2, `<p class="kicker mono">${String(i + 1).padStart(2, "0")}</p><h2>${rich(s.titulo)}</h2><p class="text">${rich(s.texto)}</p>`),
   );
-  // As fontes ficam no fechamento, para não gastar um slide só com elas
-  const sources = refs.length
-    ? `<div class="closing-refs"><p class="kicker mono">Sources</p><ol class="refs">${refs
-        .map((r, i) => `<li><span class="r-name"><span class="r-num">${i + 1}.</span> ${esc(r.nome)}${r.ano ? ` (${esc(r.ano)})` : ""}</span><span class="mono">${esc(shortUrl(r.url))}</span></li>`)
-        .join("")}</ol></div>`
-    : "";
   const cover = c.capa_grafico
     ? frame(1, `<h1 class="small">${rich(c.titulo)}</h1>${c.subtitulo ? `<p class="sub small">${rich(c.subtitulo)}</p>` : ""}${chartBlock(c.capa_grafico)}<p class="swipe mono">Swipe →</p>`, "cover with-chart")
     : frame(1, `<p class="kicker mono">Carousel</p><h1>${rich(c.titulo)}</h1>${c.subtitulo ? `<p class="sub">${rich(c.subtitulo)}</p>` : ""}<p class="swipe mono">Swipe →</p>`, "cover");
@@ -190,8 +183,8 @@ export function carouselHtml(c: CarouselContent): string {
     ...content,
     frame(
       total,
-      `<h2>${rich(c.fechamento.titulo)}</h2><p class="text">${rich(c.fechamento.texto)}</p><p class="cta mono">Follow for more like this</p>${sources}`,
-      sources ? "closing with-refs" : "closing",
+      `<h2>${rich(c.fechamento.titulo)}</h2><p class="text">${rich(c.fechamento.texto)}</p><p class="cta mono">Follow for more like this</p>`,
+      "closing",
     ),
   ];
 
@@ -237,14 +230,7 @@ export function carouselHtml(c: CarouselContent): string {
   .cover.with-chart .body { justify-content: center; padding-top: 0; }
   h1.small { font-size: 76px; }
   .sub.small { font-size: 28px; }
-  .closing.with-refs h2 { font-size: 72px; }
-  .closing.with-refs .body { gap: 24px; }
-  .closing-refs { margin-top: 12px; padding-top: 24px; border-top: 1px solid rgba(236,231,222,0.12); display: grid; gap: 14px; }
-  .refs { list-style: none; display: grid; gap: 14px; font-size: 22px; }
-  .r-num { color: ${ACCENT}; font-family: "JetBrains Mono", monospace; }
-  .refs li { display: grid; gap: 4px; }
-  .r-name { font-weight: 600; }
-  .refs .mono { font-size: 17px; color: ${MUTE}; padding-left: 30px; }
+
 </style></head>
 <body>${slides.join("")}</body></html>`;
 }
@@ -253,13 +239,24 @@ export function carouselHtml(c: CarouselContent): string {
 export class BrowserRenderer implements Renderer {
   constructor(private browser: BrowserWorker) {}
 
+  /** Uma nova tentativa se a primeira falhar (o navegador da Cloudflare às vezes demora para responder). */
   async render(c: CarouselContent): Promise<RenderedCarousel> {
+    try {
+      return await this.renderOnce(c);
+    } catch {
+      return await this.renderOnce(c);
+    }
+  }
+
+  private async renderOnce(c: CarouselContent): Promise<RenderedCarousel> {
     const browser = await puppeteer.launch(this.browser);
     try {
       const page = await browser.newPage();
       await page.setViewport({ width: SIZE, height: SIZE, deviceScaleFactor: 1 });
-      await page.setContent(carouselHtml(c), { waitUntil: "networkidle0" });
-      await page.evaluate("document.fonts.ready");
+      // Não espera a rede ficar parada (o Google Fonts às vezes demora e estourava 30 s):
+      // só o carregamento da página, e no máximo 8 s pelas fontes; sem elas, usa as de reserva
+      await page.setContent(carouselHtml(c), { waitUntil: "load", timeout: 45_000 });
+      await page.evaluate("Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 8000))])");
 
       const pdf = await page.pdf({ width: `${SIZE}px`, height: `${SIZE}px`, printBackground: true, pageRanges: "" });
       const images: Uint8Array[] = [];
