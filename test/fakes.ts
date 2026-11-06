@@ -15,12 +15,14 @@ import type {
   RenderedCarousel,
   Renderer,
   Store,
+  WeeklyMetrics,
 } from "../src/types";
 
 export class MemoryStore implements Store {
   settings = new Map<string, string>();
   posts: Post[] = [];
   carousels: Carousel[] = [];
+  metrics = new Map<string, WeeklyMetrics>();
   actions: { type: ActionType; refId: number | null; createdAt: string; value: number | null }[] = [];
 
   async getSetting(key: string) {
@@ -48,7 +50,7 @@ export class MemoryStore implements Store {
   }
   async addCarousel(c: { topic: string; content: CarouselContent; createdAt: string }) {
     const id = this.carousels.length + 1;
-    this.carousels.push({ id, topic: c.topic, content: c.content, status: "draft", created_at: c.createdAt, published_at: null });
+    this.carousels.push({ id, topic: c.topic, content: c.content, status: "draft", created_at: c.createdAt, published_at: null, post_url: null });
     return id;
   }
   async getCarousel(id: number) {
@@ -61,6 +63,15 @@ export class MemoryStore implements Store {
   }
   async listCarousels(statuses: CarouselStatus[]) {
     return this.carousels.filter((c) => statuses.includes(c.status)).map((c) => ({ ...c }));
+  }
+  async saveMetrics(m: WeeklyMetrics) {
+    this.metrics.set(m.week, { ...m });
+  }
+  async listMetrics(sinceWeek: string) {
+    return [...this.metrics.values()].filter((m) => m.week >= sinceWeek).sort((a, b) => a.week.localeCompare(b.week));
+  }
+  async listActionsSince(sinceIso: string) {
+    return this.actions.filter((a) => a.createdAt >= sinceIso).map((a) => ({ type: a.type, created_at: a.createdAt }));
   }
   async logAction(type: ActionType, refId: number | null, createdAt: string, value: number | null = null) {
     this.actions.push({ type, refId, createdAt, value });

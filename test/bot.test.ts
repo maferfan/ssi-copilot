@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Bot, DAILY_LIMIT, nextPublishLabel } from "../src/bot";
+import { Bot, DAILY_LIMIT, nextPublishLabel, parseMetrics } from "../src/bot";
 import { perfil } from "../src/perfil";
 import { click, makeDeps, msg, OWNER } from "./fakes";
 
@@ -160,12 +160,15 @@ describe("botões", () => {
 });
 
 describe("/semana", () => {
-  it("conta só as ações dos últimos 7 dias", async () => {
+  it("conta as ações da semana (segunda a domingo) e compara com a anterior", async () => {
     const { bot, store, messenger } = await setup();
-    await store.logAction("comment", 1, "2026-11-05T10:00:00Z");
-    await store.logAction("comment", 2, "2026-10-01T10:00:00Z");
+    await store.logAction("comment", 1, "2026-11-05T10:00:00Z"); // esta semana
+    await store.logAction("comment", 2, "2026-11-03T10:00:00Z"); // esta semana
+    await store.logAction("comment", 3, "2026-10-28T10:00:00Z"); // semana passada
+    await store.logAction("comment", 4, "2026-10-01T10:00:00Z"); // fora
     await bot.handleUpdate(msg("/semana"));
-    expect(messenger.last().html).toContain("Comentários: 1");
+    expect(messenger.last().html).toContain("Semana de 02/11");
+    expect(messenger.last().html).toContain("Comentários: <b>2</b> (+1 vs. semana passada)");
   });
 });
 
@@ -401,5 +404,71 @@ describe("idioma", () => {
     await bot.handleUpdate(msg(`This is what you need to know about the new release and how it will change your work.\n${URL}`));
     await bot.runDaily();
     expect(messenger.lastCard()!.html).toContain("em inglês");
+  });
+});
+
+// ---------------- fase 2 ----------------
+
+describe("métricas da semana", () => {
+  it.each([
+    ["120 3400 215", [120, 3400, 215]],
+    ["120, 3.400, 1.215", [120, 3400, 1215]],
+    ["visualizações 120\nimpressões 3,400\nseguidores 215", [120, 3400, 215]],
+  ])("entende %j", (text, nums) => {
+    expect(parseMetrics(text)).toEqual(nums);
+  });
+
+  it("recusa quando não são 3 números", () => {
+    expect(parseMetrics("120 3400")).toBeNull();
+    expect(parseMetrics("muitas")).toBeNull();
+  });
+
+  it("/metricas com os números salva na semana atual e compara com a anterior", async () => {
+    const { bot, store, messenger } = await setup();
+    await store.saveMetrics({ week: "2026-10-26", profile_views: 100, impressions: 3000, followers: 200 });
+    await bot.handleUpdate(msg("/metricas 120 3400 215"));
+    expect(store.metrics.get("2026-11-02")).toEqual({ week: "2026-11-02", profile_views: 120, impressions: 3400, followers: 215 });
+    expect(messenger.last().html).toContain("visualizações +20");
+    expect(messenger.last().html).toContain("/dashboard");
+  });
+
+  it("/metricas sem números explica onde achar e usa a próxima mensagem", async () => {
+    const { bot, store, messenger } = await setup();
+    await bot.handleUpdate(msg("/metricas"));
+    expect(messenger.last().html).toContain("Análises");
+    await bot.handleUpdate(msg("só dois 10 20"));
+    expect(messenger.last().html).toContain("exatamente 3 números");
+    await bot.handleUpdate(msg("10 20 30"));
+    expect(store.metrics.get("2026-11-02")?.followers).toBe(30);
+  });
+
+  it("domingo às 18h manda o resumo e pede os números", async () => {
+    const ctx = makeDeps({ now: () => new Date("2026-11-08T21:00:00Z") });
+    const bot = new Bot(ctx.deps, perfil);
+    await bot.handleUpdate(msg("/start"));
+    await bot.runScheduled();
+    const summary = ctx.messenger.sent.find((s) => s.html.includes("Semana de 02/11"))!;
+    expect(summary.html).toContain("Para fechar a semana");
+    await bot.handleUpdate(msg("50 900 80"));
+    expect(ctx.store.metrics.get("2026-11-02")?.impressions).toBe(900);
+  });
+
+  it("os números que chegam na segunda ainda contam para a semana do resumo", async () => {
+    let now = new Date("2026-11-08T21:00:00Z");
+    const ctx = makeDeps({ now: () => now });
+    const bot = new Bot(ctx.deps, perfil);
+    await bot.handleUpdate(msg("/start"));
+    await bot.runScheduled();
+    now = new Date("2026-11-09T12:00:00Z"); // segunda de manhã
+    await bot.handleUpdate(msg("50 900 80"));
+    expect(ctx.store.metrics.has("2026-11-02")).toBe(true);
+  });
+
+  it("carrossel publicado guarda o link do post", async () => {
+    const { bot, store } = await setup();
+    await bot.handleUpdate(msg("/carrossel tema A"));
+    await bot.handleUpdate(click("ca:1"));
+    await bot.publishCarousel();
+    expect(store.carousels[0].post_url).toBe("https://www.linkedin.com/feed/update/urn:li:share:1/");
   });
 });
