@@ -1,0 +1,68 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency: deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Conferir segredos
+        run: |
+          missing=""
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID TELEGRAM_BOT_TOKEN ANTHROPIC_API_KEY; do
+            [ -z "${!name}" ] && missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Faltam segredos no repositório:$missing (Settings → Secrets and variables → Actions)"
+            exit 1
+          fi
+
+      - name: Banco D1
+        run: |
+          node scripts/ensure-d1.mjs
+          npx wrangler d1 migrations apply DB --remote
+
+      - name: Publicar o Worker
+        id: deploy
+        run: |
+          npx wrangler deploy | tee deploy.log
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          if [ -z "$url" ]; then
+            echo "::error::Não achei a URL do Worker. Ative o subdomínio workers.dev em Workers & Pages no painel da Cloudflare."
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Segredos do Worker
+        run: |
+          node -e 'console.log(JSON.stringify({TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY}))' > secrets.json
+          npx wrangler secret bulk secrets.json
+          rm secrets.json
+
+      - name: Registrar o webhook do Telegram
+        run: |
+          secret=$(printf '%s' "ssi-copilot:$TELEGRAM_BOT_TOKEN" | sha256sum | cut -c1-48)
+          for i in 1 2 3 4 5; do
+            if curl -fsS -X POST -H "authorization: Bearer $secret" "${{ steps.deploy.outputs.url }}/setup"; then exit 0; fi
+            sleep 5
+          done
+          exit 1
