@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 # 11:00 UTC de domingo = 8h em Brasília: lista de recrutadores
 # A cada minuto: fila de trabalhos longos pedidos pelo Telegram (carrossel, recrutadores, /agora)
 [triggers]
-crons = ["0 21 * * *", "0 11 * * 0", "* * * * *"]
+crons = ["0 21 * * *", "0 11 * * SUN", "* * * * *"]  # iguais a src/crons.ts
 
 [[d1_databases]]
 binding = "DB"

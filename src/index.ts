@@ -2,6 +2,7 @@ import type { BrowserWorker } from "@cloudflare/puppeteer";
 import { Bot } from "./bot";
 import { BrowserRenderer } from "./carousel";
 import { ClaudeDrafter } from "./claude";
+import { CRONS } from "./crons";
 import { dashboardHtml, loadDashboard } from "./dashboard";
 import { fetchPreview } from "./linkedin";
 import { LinkedInGateway } from "./linkedin-api";
@@ -135,15 +136,15 @@ export default {
 
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     // 21:00 UTC = 18:00 em Brasília
-    if (controller.cron === "0 21 * * *") {
+    if (controller.cron === CRONS.daily) {
       ctx.waitUntil(makeBot(env).runScheduled());
     }
     // A cada minuto: roda os trabalhos longos pedidos pelo Telegram (até 15 min aqui, contra ~30 s no webhook)
-    if (controller.cron === "* * * * *") {
+    if (controller.cron === CRONS.queue) {
       ctx.waitUntil(runQueue(env));
     }
     // 11:00 UTC de domingo = 8h em Brasília: lista de recrutadores
-    if (controller.cron === "0 11 * * 0") {
+    if (controller.cron === CRONS.recruiters) {
       ctx.waitUntil(makeBot(env).runInvites());
     }
   },
