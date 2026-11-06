@@ -110,6 +110,25 @@ describe("LinkedInGateway", () => {
     });
   });
 
+  it("se a API nova negar o comentário, tenta a API antiga (/v2)", async () => {
+    const { gw, calls } = await connected({
+      "rest/socialActions/": () => new Response('{"code":"ACCESS_DENIED"}', { status: 403 }),
+      "v2/socialActions/": () => new Response(null, { status: 201 }),
+    });
+    await gw.comment("urn:li:activity:123", "Oi");
+    const v2 = calls.find((c) => c.url.includes("/v2/socialActions/"))!;
+    expect(v2.url).toBe("https://api.linkedin.com/v2/socialActions/urn%3Ali%3Aactivity%3A123/comments");
+    expect(JSON.parse(v2.init!.body as string)).toEqual({ actor: "urn:li:person:abc", message: { text: "Oi" } });
+  });
+
+  it("se as duas APIs negarem, explica que falta permissão", async () => {
+    const { gw } = await connected({
+      "rest/socialActions/": () => new Response("{}", { status: 403 }),
+      "v2/socialActions/": () => new Response("{}", { status: 403 }),
+    });
+    await expect(gw.comment("urn:li:activity:123", "Oi")).rejects.toThrow("Community Management");
+  });
+
   it("publica o carrossel como documento", async () => {
     const { gw, calls } = await connected({
       "documents?action=initializeUpload": () => Response.json({ value: { uploadUrl: "https://upload.example/doc", document: "urn:li:document:9" } }),
