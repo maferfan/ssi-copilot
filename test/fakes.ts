@@ -5,6 +5,7 @@ import type {
   CarouselStatus,
   Deps,
   Drafter,
+  Job,
   InlineButton,
   LinkedIn,
   LinkedInConnection,
@@ -12,6 +13,8 @@ import type {
   Post,
   PostStatus,
   Preview,
+  Recruiter,
+  RecruiterCandidate,
   RenderedCarousel,
   Renderer,
   Store,
@@ -23,6 +26,8 @@ export class MemoryStore implements Store {
   posts: Post[] = [];
   carousels: Carousel[] = [];
   metrics = new Map<string, WeeklyMetrics>();
+  recruiters: Recruiter[] = [];
+  jobs: { id: number; job: Job; status: string }[] = [];
   actions: { type: ActionType; refId: number | null; createdAt: string; value: number | null }[] = [];
 
   async getSetting(key: string) {
@@ -72,6 +77,33 @@ export class MemoryStore implements Store {
   }
   async listActionsSince(sinceIso: string) {
     return this.actions.filter((a) => a.createdAt >= sinceIso).map((a) => ({ type: a.type, created_at: a.createdAt }));
+  }
+  async knownRecruiterUrls() {
+    return this.recruiters.map((r) => r.url);
+  }
+  async addRecruiters(rows: Omit<Recruiter, "id" | "status">[]) {
+    for (const r of rows) {
+      if (this.recruiters.some((x) => x.url === r.url)) continue;
+      this.recruiters.push({ ...r, id: this.recruiters.length + 1, status: "suggested" });
+    }
+  }
+  async listRecruiterBatch(week: string, batch: number) {
+    return this.recruiters.filter((r) => r.week === week && r.batch === batch).map((r) => ({ ...r }));
+  }
+  async markRecruitersInvited(ids: number[]) {
+    for (const r of this.recruiters) if (ids.includes(r.id)) r.status = "invited";
+  }
+  async enqueueJob(job: Job) {
+    this.jobs.push({ id: this.jobs.length + 1, job, status: "pending" });
+  }
+  async takeJobs(limit: number) {
+    const picked = this.jobs.filter((j) => j.status === "pending").slice(0, limit);
+    for (const j of picked) j.status = "running";
+    return picked.map((j) => ({ id: j.id, job: j.job }));
+  }
+  async finishJob(id: number, ok: boolean) {
+    const j = this.jobs.find((x) => x.id === id);
+    if (j) j.status = ok ? "done" : "failed";
   }
   async logAction(type: ActionType, refId: number | null, createdAt: string, value: number | null = null) {
     this.actions.push({ type, refId, createdAt, value });
@@ -137,7 +169,22 @@ export function sampleCarousel(titulo = "Como escolher a stack"): CarouselConten
   };
 }
 
+export function fakeRecruiters(n: number, start = 0): RecruiterCandidate[] {
+  return Array.from({ length: n }, (_, i) => ({
+    name: `Pessoa ${start + i}`,
+    headline: "Tech Recruiter",
+    url: `https://br.linkedin.com/in/pessoa-${start + i}/?trk=x`,
+    language: (start + i) % 2 ? "en" : "pt",
+  }));
+}
+
 export class FakeDrafter implements Drafter {
+  recruiterResults: RecruiterCandidate[] = fakeRecruiters(70);
+  recruiterCalls: { exclude: string[]; want: number }[] = [];
+  async findRecruiters(exclude: string[], want: number) {
+    this.recruiterCalls.push({ exclude, want });
+    return this.recruiterResults;
+  }
   calls: { text: string | null; avoid: string[] }[] = [];
   carouselCalls: { topic: string; previous?: CarouselContent; instructions?: string }[] = [];
   async draftComment(post: Pick<Post, "text">, avoid: string[]) {

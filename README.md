@@ -25,7 +25,8 @@ O sistema faz a parte chata (lembrar, ler, escrever o rascunho) e deixa para mim
 | | Aprovo (o bot publica no LinkedIn), peço outra versão, edito ou pulo | Eu + API do LinkedIn |
 | **Quando eu quiser** | Mando `/carrossel <tema>`; o Claude monta os slides e eu aprovo a prévia | Eu + Claude |
 | **Sexta, 18h** | O carrossel aprovado é publicado no meu perfil | API do LinkedIn |
-| **Sábado** *(fase 4)* | Lista de recrutadores da minha área com notas de conexão prontas | Claude + busca pública |
+| **Domingo, 8h** | Lista de 50 recrutadores (Brasil e internacional, só perfis em português ou inglês) em blocos de 10; os 5 primeiros com nota de agradecimento pronta | Claude (busca na web) |
+| | Abro cada link, toco em Conectar e marco "✔️ Enviei" | Eu (10–15 min) |
 | **Domingo, 18h** | Resumo da semana; mando 3 números das Análises do LinkedIn | Bot + eu (30 segundos) |
 | **Sempre** | Painel público com ações e resultados das últimas 12 semanas | Worker |
 
@@ -38,6 +39,12 @@ Nada é publicado ou enviado no LinkedIn sem eu ver antes. Isso respeita os term
 2. Se o LinkedIn não deixar ler o post pelo link, o bot pede o texto.
 3. Às 18h chegam até 3 sugestões, cada uma com **✅ Aprovar · 🔄 Outra versão · ✏️ Editar · ❌ Pular**.
 4. **✅ Aprovar** (ou mandar a versão editada) publica o comentário direto no post, pela API oficial. Se o LinkedIn recusar, o bot explica o motivo e manda o texto pronto para copiar.
+
+**Recrutadores de domingo**
+1. Às 8h, o Claude busca na web (só em linkedin.com) perfis públicos de recrutadores de tecnologia: metade Brasil, metade internacional (vagas remotas).
+2. O código fica só com perfis em português ou inglês, tira repetidos e quem já foi sugerido em semanas anteriores.
+3. Chegam 5 blocos de 10, cada perfil com link, título e bandeira (🇧🇷 / 🌎). Os 5 primeiros vêm com uma nota curta de agradecimento no idioma da pessoa; o LinkedIn gratuito libera poucas notas por mês.
+4. Eu abro cada link e toco em **Conectar** (não existe API de convites). No fim do bloco, **✔️ Enviei** registra os 10 convites no resumo e no painel.
 
 **Carrossel de sexta**
 1. `/carrossel como escolher a stack de um site`: o Claude escreve capa, slides, fechamento e legenda.
@@ -54,6 +61,7 @@ Nada é publicado ou enviado no LinkedIn sem eu ver antes. Isso respeita os term
 | `/semana` | Resumo da semana (segunda a domingo), comparado com a anterior |
 | `/metricas 120 3400 215` | Registra visualizações do perfil, impressões e seguidores da semana |
 | `/painel` | Link do dashboard |
+| `/recrutadores` | Gera a lista de recrutadores na hora |
 | `/ajuda` | Explica como usar |
 
 ---
@@ -118,7 +126,7 @@ flowchart LR
 | **TypeScript** | Linguagem | Tipos pegam erros antes do deploy (ex.: um status de post que não existe) | JavaScript puro |
 | **Wrangler** | CLI da Cloudflare | Publica o Worker, aplica migrações e grava segredos; o `wrangler.toml` descreve tudo em texto | Configurar à mão no painel |
 | **GitHub Actions** | CI e deploy | Testa cada pull request e publica cada push na `main`, sem instalar nada no computador | Deploy manual |
-| **Vitest** | Testes | Rápido, roda TypeScript direto; 88 testes em cerca de 1 segundo | Jest |
+| **Vitest** | Testes | Rápido, roda TypeScript direto; 100 testes em cerca de 1 segundo | Jest |
 
 ### Técnicas de engenharia
 
@@ -150,6 +158,10 @@ falta o texto → aguardando 18h → sugestão enviada → aprovado → comentad
 **Plano B em cascata na publicação.** Primeiro tenta como documento (o carrossel em PDF do LinkedIn). Se o LinkedIn negar, publica como post de várias imagens. Se ainda falhar, manda o PDF e a legenda para eu postar à mão. Comentários seguem a mesma ideia: se a API recusar, o texto vem pronto para copiar.
 
 **Agenda por dia da semana.** Um único cron às 18h decide o que fazer pelo dia em Brasília: comentários todo dia, lembrete na quinta, publicação na sexta, resumo no domingo. As semanas vão de segunda a domingo no horário de Brasília ([`src/week.ts`](src/week.ts)); números enviados na segunda de manhã ainda contam para a semana do resumo.
+
+**Fila para trabalhos longos.** Quando um pedido chega pelo Telegram, o Worker tem só ~30 segundos depois de responder. Montar um carrossel ou buscar 50 recrutadores pode levar minutos. Então o webhook só grava o pedido numa tabela `jobs` e avisa; um cron de cada minuto pega os pendentes (com `UPDATE … RETURNING`, para nenhum rodar duas vezes) e executa com até 15 minutos ([`src/index.ts`](src/index.ts)).
+
+**Busca de recrutadores com ferramenta do Claude.** A busca usa a ferramenta de busca na web do próprio Claude, restrita a `linkedin.com`, sem outro serviço. O modelo devolve um JSON com nome, título, link e idioma do perfil; o código valida tudo ([`src/recruiters.ts`](src/recruiters.ts)): normaliza o link, descarta páginas de empresa, outros idiomas e repetidos. A nota de conexão é um modelo fixo por idioma, não texto gerado, para nunca inventar nada sobre a pessoa.
 
 **Dashboard sem framework.** O painel ([`src/dashboard.ts`](src/dashboard.ts)) é HTML montado no próprio Worker, com gráficos em SVG desenhados no servidor: nenhuma biblioteca de gráficos, nenhum build. Cada medida tem o seu gráfico (escalas diferentes nunca dividem o mesmo eixo), semanas sem número viram lacuna na linha em vez de zero, só o último valor ganha rótulo, cada barra e ponto tem dica ao passar o mouse e há uma tabela com todos os números.
 
@@ -193,6 +205,7 @@ O bot nunca trava por causa do LinkedIn.
 | [`src/linkedin.ts`](src/linkedin.ts) | Extrair o link e ler a prévia pública do post |
 | [`src/dashboard.ts`](src/dashboard.ts) | Painel: dados por semana e gráficos em SVG |
 | [`src/week.ts`](src/week.ts) | Semanas de segunda a domingo no horário de Brasília |
+| [`src/recruiters.ts`](src/recruiters.ts) | Seleção dos recrutadores e nota de conexão |
 | [`src/language.ts`](src/language.ts) | Detecta se o post está em português ou inglês |
 | [`src/telegram.ts`](src/telegram.ts) | Cliente da Bot API (mensagens, álbum, PDF) e senha do webhook |
 | [`src/store.ts`](src/store.ts) | Acesso ao D1 |
@@ -208,7 +221,7 @@ O bot nunca trava por causa do LinkedIn.
 | API do LinkedIn | Grátis |
 | Telegram | Grátis |
 | GitHub Actions | Grátis (repositório público) |
-| Claude API (Sonnet 5.5) | ~US$ 2–3 em créditos pré-pagos (3 comentários/dia + 4 carrosséis) |
+| Claude API (Sonnet 5.5) | ~US$ 3–4 em créditos pré-pagos (3 comentários/dia, 4 carrosséis e 4 listas de recrutadores com buscas) |
 
 ---
 
@@ -271,7 +284,7 @@ npm run typecheck
 - [x] **Fase 1**: salvar posts pelo Telegram, sugestões às 18h, aprovar/editar/pular, registro de comentários
 - [x] **Fase 2**: resumo de domingo, números semanais das Análises do LinkedIn e dashboard público
 - [x] **Fase 3**: conexão OAuth com o LinkedIn, comentários publicados ao aprovar, carrossel com prévia e publicação na sexta
-- [ ] **Fase 4**: lista de sábado com 50 recrutadores da área e notas de conexão
+- [x] **Fase 4**: lista de domingo com 50 recrutadores (Brasil e internacional) e notas de agradecimento
 
 ## Licença
 

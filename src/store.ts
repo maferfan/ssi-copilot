@@ -1,4 +1,4 @@
-import type { ActionType, Carousel, CarouselContent, CarouselStatus, Post, PostStatus, Store, WeeklyMetrics } from "./types";
+import type { ActionType, Carousel, CarouselContent, CarouselStatus, Job, Post, PostStatus, Recruiter, Store, WeeklyMetrics } from "./types";
 
 interface CarouselRow extends Omit<Carousel, "content"> {
   content: string;
@@ -115,6 +115,55 @@ export class D1Store implements Store {
       .bind(sinceIso)
       .all<{ type: ActionType; created_at: string }>();
     return results;
+  }
+
+  async knownRecruiterUrls() {
+    const { results } = await this.db.prepare("SELECT url FROM recruiters").all<{ url: string }>();
+    return results.map((r) => r.url);
+  }
+
+  async addRecruiters(rows: Omit<Recruiter, "id" | "status">[]) {
+    if (rows.length === 0) return;
+    const stmt = this.db.prepare(
+      "INSERT OR IGNORE INTO recruiters (url, name, headline, language, note, week, batch, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'suggested', ?)",
+    );
+    await this.db.batch(rows.map((r) => stmt.bind(r.url, r.name, r.headline, r.language, r.note, r.week, r.batch, r.created_at)));
+  }
+
+  async listRecruiterBatch(week: string, batch: number) {
+    const { results } = await this.db
+      .prepare("SELECT * FROM recruiters WHERE week = ? AND batch = ? ORDER BY id")
+      .bind(week, batch)
+      .all<Recruiter>();
+    return results;
+  }
+
+  async markRecruitersInvited(ids: number[]) {
+    if (ids.length === 0) return;
+    const stmt = this.db.prepare("UPDATE recruiters SET status = 'invited' WHERE id = ?");
+    await this.db.batch(ids.map((id) => stmt.bind(id)));
+  }
+
+  async enqueueJob(job: Job, createdAt: string) {
+    await this.db
+      .prepare("INSERT INTO jobs (kind, payload, status, created_at) VALUES (?, ?, 'pending', ?)")
+      .bind(job.kind, JSON.stringify(job), createdAt)
+      .run();
+  }
+
+  async takeJobs(limit: number) {
+    // UPDATE ... RETURNING marca e devolve de uma vez: dois crons não pegam o mesmo trabalho
+    const { results } = await this.db
+      .prepare(
+        "UPDATE jobs SET status = 'running' WHERE id IN (SELECT id FROM jobs WHERE status = 'pending' ORDER BY id LIMIT ?) RETURNING id, payload",
+      )
+      .bind(limit)
+      .all<{ id: number; payload: string }>();
+    return results.sort((a, b) => a.id - b.id).map((r) => ({ id: r.id, job: JSON.parse(r.payload) as Job }));
+  }
+
+  async finishJob(id: number, ok: boolean) {
+    await this.db.prepare("UPDATE jobs SET status = ? WHERE id = ?").bind(ok ? "done" : "failed", id).run();
   }
 
   async logAction(type: ActionType, refId: number | null, createdAt: string, value: number | null = null) {
