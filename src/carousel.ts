@@ -35,14 +35,24 @@ function validChart(g: CarouselChart | undefined): CarouselChart | undefined {
 }
 
 /** Garante o formato que o modelo e o renderizador esperam. */
+/** Capa + no máximo 3 slides de conteúdo + fechamento = até 5 slides (de preferência 3). */
+export const MAX_CONTENT_SLIDES = 3;
+/** Contando o da capa. */
+export const MAX_CHARTS = 3;
+
 export function normalizeCarousel(c: CarouselContent): CarouselContent {
-  const slides = (c.slides ?? []).filter((s) => s?.titulo?.trim()).slice(0, 8);
-  if (!c.titulo?.trim() || slides.length < 3) throw new Error("O carrossel veio incompleto. Tente de novo.");
+  const slides = (c.slides ?? []).filter((s) => s?.titulo?.trim()).slice(0, MAX_CONTENT_SLIDES);
+  if (!c.titulo?.trim() || slides.length < 1) throw new Error("O carrossel veio incompleto. Tente de novo.");
+  const capa = validChart(c.capa_grafico);
+  let charts = capa ? 1 : 0;
   const out: CarouselContent = {
     titulo: c.titulo.trim(),
     subtitulo: (c.subtitulo ?? "").trim(),
+    ...(capa ? { capa_grafico: capa } : {}),
     slides: slides.map((s) => {
-      const grafico = validChart(s.grafico);
+      let grafico = validChart(s.grafico);
+      if (grafico && charts >= MAX_CHARTS) grafico = undefined;
+      if (grafico) charts++;
       return { titulo: s.titulo.trim(), texto: (s.texto ?? "").trim(), ...(grafico ? { grafico } : {}) };
     }),
     fechamento: { titulo: (c.fechamento?.titulo ?? "What do you think?").trim(), texto: (c.fechamento?.texto ?? "").trim() },
@@ -50,8 +60,8 @@ export function normalizeCarousel(c: CarouselContent): CarouselContent {
   };
   // Referências = fontes dos gráficos, sem repetir, na ordem em que aparecem
   const refs: Reference[] = [];
-  for (const s of out.slides) {
-    const f = s.grafico?.fonte;
+  for (const g of [out.capa_grafico, ...out.slides.map((s) => s.grafico)]) {
+    const f = g?.fonte;
     if (f && !refs.some((r) => r.url === f.url)) refs.push(f);
   }
   if (refs.length) out.referencias = refs;
@@ -151,7 +161,7 @@ function chartBlock(g: CarouselChart): string {
 /** HTML com um slide por página, no visual do matheusferrazzadev.com. */
 export function carouselHtml(c: CarouselContent): string {
   const refs = c.referencias ?? [];
-  const total = c.slides.length + 2 + (refs.length ? 1 : 0);
+  const total = c.slides.length + 2;
   const num = (i: number) => `${String(i).padStart(2, "0")} / ${String(total).padStart(2, "0")}`;
   const frame = (i: number, body: string, cls = "") => `
 <section class="slide ${cls}">
@@ -165,23 +175,24 @@ export function carouselHtml(c: CarouselContent): string {
       ? frame(i + 2, `<p class="kicker mono">${String(i + 1).padStart(2, "0")}</p><h2 class="small">${rich(s.titulo)}</h2><p class="text small">${rich(s.texto)}</p>${chartBlock(s.grafico)}`, "with-chart")
       : frame(i + 2, `<p class="kicker mono">${String(i + 1).padStart(2, "0")}</p><h2>${rich(s.titulo)}</h2><p class="text">${rich(s.texto)}</p>`),
   );
-  const references = refs.length
-    ? [
-        frame(
-          c.slides.length + 2,
-          `<p class="kicker mono">Sources</p><ol class="refs">${refs
-            .map((r, i) => `<li><span class="r-name"><span class="r-num">${i + 1}.</span> ${esc(r.nome)}${r.ano ? ` (${esc(r.ano)})` : ""}</span><span class="mono">${esc(shortUrl(r.url))}</span></li>`)
-            .join("")}</ol>`,
-          "references",
-        ),
-      ]
-    : [];
+  // As fontes ficam no fechamento, para não gastar um slide só com elas
+  const sources = refs.length
+    ? `<div class="closing-refs"><p class="kicker mono">Sources</p><ol class="refs">${refs
+        .map((r, i) => `<li><span class="r-name"><span class="r-num">${i + 1}.</span> ${esc(r.nome)}${r.ano ? ` (${esc(r.ano)})` : ""}</span><span class="mono">${esc(shortUrl(r.url))}</span></li>`)
+        .join("")}</ol></div>`
+    : "";
+  const cover = c.capa_grafico
+    ? frame(1, `<h1 class="small">${rich(c.titulo)}</h1>${c.subtitulo ? `<p class="sub small">${rich(c.subtitulo)}</p>` : ""}${chartBlock(c.capa_grafico)}<p class="swipe mono">Swipe →</p>`, "cover with-chart")
+    : frame(1, `<p class="kicker mono">Carousel</p><h1>${rich(c.titulo)}</h1>${c.subtitulo ? `<p class="sub">${rich(c.subtitulo)}</p>` : ""}<p class="swipe mono">Swipe →</p>`, "cover");
 
   const slides = [
-    frame(1, `<p class="kicker mono">Carousel</p><h1>${rich(c.titulo)}</h1>${c.subtitulo ? `<p class="sub">${rich(c.subtitulo)}</p>` : ""}<p class="swipe mono">Swipe →</p>`, "cover"),
+    cover,
     ...content,
-    ...references,
-    frame(total, `<h2>${rich(c.fechamento.titulo)}</h2><p class="text">${rich(c.fechamento.texto)}</p><p class="cta mono">Follow for more like this</p>`, "closing"),
+    frame(
+      total,
+      `<h2>${rich(c.fechamento.titulo)}</h2><p class="text">${rich(c.fechamento.texto)}</p><p class="cta mono">Follow for more like this</p>${sources}`,
+      sources ? "closing with-refs" : "closing",
+    ),
   ];
 
   return `<!doctype html>
@@ -223,11 +234,17 @@ export function carouselHtml(c: CarouselContent): string {
   .c-tick { fill: ${MUTE}; font: 400 20px "JetBrains Mono", monospace; }
   .c-source { font-size: 18px; color: ${MUTE}; }
   .c-source.illustrative { color: ${ACCENT}; }
-  .refs { list-style: none; display: grid; gap: 26px; font-size: 28px; }
+  .cover.with-chart .body { justify-content: center; padding-top: 0; }
+  h1.small { font-size: 76px; }
+  .sub.small { font-size: 28px; }
+  .closing.with-refs h2 { font-size: 72px; }
+  .closing.with-refs .body { gap: 24px; }
+  .closing-refs { margin-top: 12px; padding-top: 24px; border-top: 1px solid rgba(236,231,222,0.12); display: grid; gap: 14px; }
+  .refs { list-style: none; display: grid; gap: 14px; font-size: 22px; }
   .r-num { color: ${ACCENT}; font-family: "JetBrains Mono", monospace; }
   .refs li { display: grid; gap: 4px; }
   .r-name { font-weight: 600; }
-  .refs .mono { font-size: 20px; color: ${MUTE}; padding-left: 36px; }
+  .refs .mono { font-size: 17px; color: ${MUTE}; padding-left: 30px; }
 </style></head>
 <body>${slides.join("")}</body></html>`;
 }

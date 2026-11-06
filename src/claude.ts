@@ -133,9 +133,10 @@ About ${p.nome}: ${p.resumo}
 Goal: ${p.objetivo}
 
 What a good carousel looks like:
-- The cover promises a concrete takeaway. Short title (up to 8 words), one-line subtitle.
-- 4 to 6 content slides, one idea each. Title up to 7 words. Text up to 40 words, or up to 28 words on a slide with a chart.
-- The carousel has 1 to 3 charts in total, on the slides where data makes the point stronger. Every other slide uses mode "none" (text only).
+- Short carousels: 3 to 5 slides in total = cover + 1 to 3 content slides + closing. Prefer 1 content slide (3 slides total); use more only if the topic truly needs it.
+- The cover (slide 1) ALWAYS has a chart ("grafico_capa"): the strongest data point, used as the hook. Short title (up to 8 words) that the chart backs up, one-line subtitle.
+- Content slides: one idea each. Title up to 7 words. Text up to 40 words, or up to 28 words on a slide with a chart.
+- At most 3 charts in total, counting the cover. Content slides without a chart use mode "none" (text only).
   - mode "research": use a research item that fits (by its id). Its numbers are inserted automatically; do not repeat them in "dados". Prefer this whenever a research item fits.
   - mode "illustrative": only if no research item fits any slide, so the carousel still has a chart. Use a conceptual comparison with obviously relative values (e.g. effort vs impact on a 1-10 scale). It is labelled "Illustrative" on the slide. Never present illustrative values as facts in the text.
 - Only state numbers in the text that come from a research item you are using on that slide.
@@ -171,13 +172,14 @@ const CHART_SCHEMA = {
 const CAROUSEL_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["titulo", "subtitulo", "slides", "fechamento", "legenda"],
+  required: ["titulo", "subtitulo", "grafico_capa", "slides", "fechamento", "legenda"],
   properties: {
     titulo: { type: "string", description: "Cover title" },
     subtitulo: { type: "string", description: "One line under the cover title" },
+    grafico_capa: { ...CHART_SCHEMA, description: "Cover chart (always present: research or illustrative, never none)" },
     slides: {
       type: "array",
-      description: "4 to 6 content slides; 1 to 3 of them with a chart",
+      description: "1 to 3 content slides (prefer 1); charts optional, at most 2 here",
       items: {
         type: "object",
         additionalProperties: false,
@@ -222,28 +224,28 @@ export function buildChart(d: DraftChart | undefined, research: ResearchItem[]):
   return { tipo: d.tipo, titulo: d.titulo, unidade: d.unidade, dados: d.dados, fonte: null, ilustrativo: true };
 }
 
-/** No máximo 3 gráficos, e pelo menos 1 quando houver pesquisa: todo carrossel tem gráfico. */
-export function ensureCharts(slides: { titulo: string; texto: string; grafico?: CarouselChart }[], research: ResearchItem[]) {
-  let count = 0;
-  const out = slides.map((s) => {
-    if (!s.grafico) return s;
-    if (count >= 3) return { titulo: s.titulo, texto: s.texto };
-    count++;
-    return s;
-  });
-  if (count === 0 && research.length && out.length) {
-    const first = research[0];
-    out[0] = { ...out[0], grafico: buildChart({ modo: "research", id_pesquisa: first.id, tipo: first.tipo, titulo: first.achado, unidade: "", dados: [] }, research) };
+type ContentSlide = { titulo: string; texto: string; grafico?: CarouselChart };
+
+/**
+ * A capa sempre tem gráfico: se o modelo não pôs, sobe o primeiro gráfico dos slides;
+ * se nenhum slide tem, usa o primeiro dado conferido da pesquisa.
+ */
+export function ensureCoverChart(cover: CarouselChart | undefined, slides: ContentSlide[], research: ResearchItem[]) {
+  if (cover) return { cover, slides };
+  const idx = slides.findIndex((s) => s.grafico);
+  if (idx >= 0) {
+    const moved = slides[idx].grafico;
+    return { cover: moved, slides: slides.map((s, i) => (i === idx ? { titulo: s.titulo, texto: s.texto } : s)) };
   }
-  return out;
+  const first = research[0];
+  const fromResearch = first ? buildChart({ modo: "research", id_pesquisa: first.id, tipo: first.tipo, titulo: first.achado, unidade: "", dados: [] }, research) : undefined;
+  return { cover: fromResearch, slides };
 }
 
 /** Pesquisa já conferida de uma versão anterior, para ajustes não pagarem nova busca. */
 export function researchFromCarousel(c: CarouselContent): ResearchItem[] {
-  return c.slides.flatMap((s, i) =>
-    s.grafico?.fonte
-      ? [{ id: `R${i + 1}`, fonte: s.grafico.fonte.nome, ano: s.grafico.fonte.ano, url: s.grafico.fonte.url, achado: s.grafico.titulo, tipo: s.grafico.tipo, unidade: s.grafico.unidade, dados: s.grafico.dados }]
-      : [],
+  return [c.capa_grafico, ...c.slides.map((s) => s.grafico)].flatMap((g, i) =>
+    g?.fonte ? [{ id: `R${i + 1}`, fonte: g.fonte.nome, ano: g.fonte.ano, url: g.fonte.url, achado: g.titulo, tipo: g.tipo, unidade: g.unidade, dados: g.dados }] : [],
   );
 }
 
@@ -339,20 +341,22 @@ export class ClaudeDrafter implements Drafter {
     if (response.stop_reason === "refusal") throw new Error("O Claude não quis escrever sobre esse tema.");
     if (response.stop_reason === "max_tokens") throw new Error("O carrossel ficou longo demais. Tente um tema mais específico.");
     const json = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
-    const draft = JSON.parse(json) as Omit<CarouselContent, "slides"> & { slides: { titulo: string; texto: string; grafico?: DraftChart }[] };
+    const draft = JSON.parse(json) as Omit<CarouselContent, "slides" | "capa_grafico"> & {
+      grafico_capa?: DraftChart;
+      slides: { titulo: string; texto: string; grafico?: DraftChart }[];
+    };
     const custo = costOf({
       input: research.input + response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0),
       output: research.output + response.usage.output_tokens,
       searches: research.searches,
     });
-    return normalizeCarousel({
-      ...draft,
-      slides: ensureCharts(
-        draft.slides.map((s) => ({ titulo: s.titulo, texto: s.texto, grafico: buildChart(s.grafico, research.items) })),
-        research.items,
-      ),
-      custo,
-    });
+    const { cover, slides } = ensureCoverChart(
+      buildChart(draft.grafico_capa, research.items),
+      draft.slides.map((s) => ({ titulo: s.titulo, texto: s.texto, grafico: buildChart(s.grafico, research.items) })),
+      research.items,
+    );
+    const { grafico_capa: _ignored, ...rest } = draft;
+    return normalizeCarousel({ ...rest, capa_grafico: cover, slides, custo });
   }
 
 }

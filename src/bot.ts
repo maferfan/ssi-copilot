@@ -169,15 +169,17 @@ export function carouselCard(c: Carousel, when: string): string {
       return `${i + 1}. ${esc(s.titulo.replace(/\*\*/g, ""))}${chart}`;
     })
     .join("\n");
+  const cg = c.content.capa_grafico;
+  const cover = cg ? `\nCapa · 📊 ${cg.fonte ? `${esc(cg.fonte.nome)}${cg.fonte.ano ? ` ${esc(cg.fonte.ano)}` : ""}` : "<i>ilustrativo</i>"}` : "\nCapa · ⚠️ <i>sem gráfico</i>";
   const refs = c.content.referencias?.length ?? 0;
-  const sources = refs ? `\n🔗 ${refs === 1 ? "1 fonte conferida" : `${refs} fontes conferidas`} no slide de referências.` : "\n⚠️ <i>Nenhuma fonte conferida: todos os gráficos são ilustrativos.</i>";
+  const sources = refs ? `\n🔗 ${refs === 1 ? "1 fonte conferida" : `${refs} fontes conferidas`}, listadas no slide final.` : "\n⚠️ <i>Nenhuma fonte conferida: todos os gráficos são ilustrativos.</i>";
   const k = c.content.custo;
   const cost = k
     ? `\n💰 ${(k.inputTokens / 1000).toFixed(1)}k tokens de entrada, ${(k.outputTokens / 1000).toFixed(1)}k de saída, ${k.searches} ${k.searches === 1 ? "busca" : "buscas"} ≈ US$ ${k.usd.toFixed(2)}`
     : "";
   return `🎠 <b>Carrossel</b> · ${esc(c.topic)}
 
-<b>${esc(c.content.titulo.replace(/\*\*/g, ""))}</b>
+<b>${esc(c.content.titulo.replace(/\*\*/g, ""))}</b>${cover}
 ${slides}
 ${sources}${cost}
 

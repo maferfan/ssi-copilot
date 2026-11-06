@@ -46,6 +46,8 @@ export interface CarouselCost {
 export interface CarouselContent {
   titulo: string;
   subtitulo: string;
+  /** Gráfico da capa (slide 1): o dado mais forte, como gancho. */
+  capa_grafico?: CarouselChart;
   slides: { titulo: string; texto: string; grafico?: CarouselChart }[];
   fechamento: { titulo: string; texto: string };
   legenda: string;

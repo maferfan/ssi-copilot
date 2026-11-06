@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { carouselHtml, fmtValue, normalizeCarousel } from "../src/carousel";
 import {
   buildChart,
-  ensureCharts,
+  ensureCoverChart,
   carouselSystemPrompt,
   carouselUserPrompt,
   costOf,
@@ -80,16 +80,22 @@ describe("gráficos", () => {
     expect(buildChart({ modo: "none", id_pesquisa: "", tipo: "bar", titulo: "", unidade: "", dados: [] }, [item()])).toBeUndefined();
   });
 
-  it("todo carrossel tem gráfico: sem nenhum, o primeiro dado conferido vai para o primeiro slide", () => {
-    const slides = ensureCharts([{ titulo: "A", texto: "" }, { titulo: "B", texto: "" }], [item()]);
-    expect(slides[0].grafico?.fonte?.nome).toBe("Stack Overflow Developer Survey");
-    expect(slides[1].grafico).toBeUndefined();
+  it("a capa sempre tem gráfico: sem um, sobe o primeiro gráfico dos slides", () => {
+    const g = buildChart({ modo: "research", id_pesquisa: "R1", tipo: "bar", titulo: "", unidade: "", dados: [] }, [item()]);
+    const r = ensureCoverChart(undefined, [{ titulo: "A", texto: "" }, { titulo: "B", texto: "", grafico: g }], [item()]);
+    expect(r.cover?.fonte?.nome).toBe("Stack Overflow Developer Survey");
+    expect(r.slides[1].grafico).toBeUndefined();
   });
 
-  it("no máximo 3 gráficos por carrossel", () => {
+  it("a capa sempre tem gráfico: sem nenhum nos slides, usa o primeiro dado conferido", () => {
+    const r = ensureCoverChart(undefined, [{ titulo: "A", texto: "" }], [item()]);
+    expect(r.cover?.dados).toEqual(item().dados);
+  });
+
+  it("no máximo 3 gráficos por carrossel, contando o da capa", () => {
     const g = buildChart({ modo: "research", id_pesquisa: "R1", tipo: "bar", titulo: "", unidade: "", dados: [] }, [item()]);
-    const slides = ensureCharts(Array.from({ length: 5 }, (_, i) => ({ titulo: `S${i}`, texto: "", grafico: g })), [item()]);
-    expect(slides.filter((s) => s.grafico)).toHaveLength(3);
+    const c = normalizeCarousel({ ...sampleCarousel(), capa_grafico: g, slides: Array.from({ length: 3 }, (_, i) => ({ titulo: `S${i}`, texto: "", grafico: g })) });
+    expect(c.slides.filter((x) => x.grafico)).toHaveLength(2);
   });
 
   it("ajuste reaproveita as fontes já conferidas sem nova busca", () => {
@@ -115,26 +121,27 @@ describe("slides", () => {
   const withCharts = () =>
     normalizeCarousel({
       ...sampleCarousel("Is your site **slow**?"),
+      capa_grafico: buildChart({ modo: "research", id_pesquisa: "R1", tipo: "bar", titulo: "Most used languages", unidade: "", dados: [] }, [item()]),
       slides: [
-        { titulo: "JS everywhere", texto: "Most devs use it.", grafico: buildChart({ modo: "research", id_pesquisa: "R1", tipo: "bar", titulo: "Most used languages", unidade: "", dados: [] }, [item()]) },
         { titulo: "Effort", texto: "Small fixes first.", grafico: buildChart({ modo: "illustrative", id_pesquisa: "", tipo: "bar", titulo: "Effort vs impact", unidade: "", dados: [{ label: "Images", valor: 8 }, { label: "Fonts", valor: 5 }] }, []) },
-        { titulo: "Plain", texto: "No chart here." },
       ],
     });
 
-  it("cada gráfico mostra a fonte ou o selo de ilustrativo, e há um slide de referências", () => {
+  it("capa com gráfico, fonte ou selo de ilustrativo, e as fontes no slide final", () => {
     const html = carouselHtml(withCharts());
+    expect(html).toContain('class="slide cover with-chart"');
     expect(html.match(/<figure class="chart">/g)).toHaveLength(2);
     expect(html).toContain("Source: Stack Overflow Developer Survey (2025) · survey.stackoverflow.co/2025/technology");
     expect(html).toContain("Illustrative data, not a measurement");
-    expect(html).toContain('class="kicker mono">Sources</p>');
-    expect(html).toContain("01 / 06"); // capa + 3 + referências + fechamento
-    expect(html).toContain("Swipe →");
+    expect(html).toContain('class="slide closing with-refs"');
+    expect(html).toContain('<div class="closing-refs"><p class="kicker mono">Sources</p>');
+    expect(html.match(/<section class="slide/g)).toHaveLength(3); // capa + 1 + fechamento
+    expect(html).toContain("01 / 03");
   });
 
   it("referências não se repetem", () => {
     const c = withCharts();
-    c.slides[2].grafico = c.slides[0].grafico;
+    c.slides[0].grafico = c.capa_grafico;
     expect(normalizeCarousel(c).referencias).toHaveLength(1);
   });
 
@@ -146,10 +153,11 @@ describe("slides", () => {
 });
 
 describe("prompts e custo", () => {
-  it("escreve em inglês, com 1 a 3 gráficos por carrossel", () => {
+  it("escreve em inglês, com 3 a 5 slides e gráfico sempre na capa", () => {
     const sys = carouselSystemPrompt(perfil);
     expect(sys).toContain("always in English");
-    expect(sys).toContain("1 to 3 charts in total");
+    expect(sys).toContain("3 to 5 slides in total");
+    expect(sys).toContain("The cover (slide 1) ALWAYS has a chart");
     expect(carouselUserPrompt("web perf", [])).toContain("use illustrative charts only");
     expect(carouselUserPrompt("web perf", [item()])).toContain('"id": "R1"');
   });
