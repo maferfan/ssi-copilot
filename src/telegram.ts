@@ -62,6 +62,31 @@ export class TelegramMessenger implements Messenger {
     await this.call("answerCallbackQuery", { callback_query_id: callbackId, text });
   }
 
+  private async upload(method: string, form: FormData) {
+    const res = await fetch(`https://api.telegram.org/bot${this.token}/${method}`, { method: "POST", body: form });
+    const json = (await res.json()) as { ok: boolean; description?: string };
+    if (!json.ok) throw new Error(`Telegram ${method}: ${json.description ?? res.status}`);
+  }
+
+  async sendPhotos(chatId: number, images: Uint8Array[]) {
+    const form = new FormData();
+    form.set("chat_id", String(chatId));
+    form.set("media", JSON.stringify(images.slice(0, 10).map((_, i) => ({ type: "photo", media: `attach://slide${i}` }))));
+    images.slice(0, 10).forEach((img, i) => form.set(`slide${i}`, new Blob([img], { type: "image/png" }), `slide-${i + 1}.png`));
+    await this.upload("sendMediaGroup", form);
+  }
+
+  async sendDocument(chatId: number, file: Uint8Array, filename: string, caption?: string) {
+    const form = new FormData();
+    form.set("chat_id", String(chatId));
+    form.set("document", new Blob([file], { type: "application/pdf" }), filename);
+    if (caption) {
+      form.set("caption", caption);
+      form.set("parse_mode", "HTML");
+    }
+    await this.upload("sendDocument", form);
+  }
+
   async setWebhook(url: string, secretToken: string) {
     return this.call<boolean>("setWebhook", {
       url,
@@ -75,6 +100,8 @@ export class TelegramMessenger implements Messenger {
     return this.call<boolean>("setMyCommands", {
       commands: [
         { command: "agora", description: "Gerar as sugestões de comentário agora" },
+        { command: "carrossel", description: "Criar o carrossel de sexta: /carrossel <tema>" },
+        { command: "conectar", description: "Conectar ou ver a conexão com o LinkedIn" },
         { command: "fila", description: "Ver os posts salvos" },
         { command: "semana", description: "Resumo das ações dos últimos 7 dias" },
         { command: "ajuda", description: "Como usar o bot" },

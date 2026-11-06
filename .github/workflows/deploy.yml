@@ -15,6 +15,9 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      LINKEDIN_CLIENT_ID: ${{ secrets.LINKEDIN_CLIENT_ID }}
+      LINKEDIN_CLIENT_SECRET: ${{ secrets.LINKEDIN_CLIENT_SECRET }}
+      TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,7 +57,12 @@ jobs:
 
       - name: Segredos do Worker
         run: |
-          node -e 'console.log(JSON.stringify({TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY}))' > secrets.json
+          # Os do LinkedIn são opcionais: só vão para o Worker se existirem no GitHub
+          node -e '
+            const names = ["TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY", "LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET", "TOKEN_ENCRYPTION_KEY"];
+            const out = Object.fromEntries(names.filter((n) => process.env[n]).map((n) => [n, process.env[n]]));
+            console.log(JSON.stringify(out));
+          ' > secrets.json
           npx wrangler secret bulk secrets.json
           rm secrets.json
 

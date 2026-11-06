@@ -11,6 +11,24 @@ export function extractLinkedInUrl(text: string, entityUrls: string[] = []): str
   return null;
 }
 
+/**
+ * Identificador do post para a API (urn:li:activity|share|ugcPost:ID).
+ * Aceita links /feed/update/urn:li:...:ID e /posts/fulano_titulo-activity-ID-xxxx.
+ */
+export function extractPostUrn(url: string): string | null {
+  let decoded = url;
+  try {
+    decoded = decodeURIComponent(url);
+  } catch {
+    /* link com % inválido: usa como veio */
+  }
+  const direct = decoded.match(/urn:li:(activity|share|ugcPost):(\d+)/);
+  if (direct) return `urn:li:${direct[1]}:${direct[2]}`;
+  const slug = decoded.match(/[-_](activity|share|ugcPost)-(\d{10,})/);
+  if (slug) return `urn:li:${slug[1]}:${slug[2]}`;
+  return null;
+}
+
 /** Texto que veio junto com o link (quando o usuário colou o post inteiro). */
 export function textAroundUrl(text: string, url: string): string {
   return text.replace(url, "").trim();
@@ -71,18 +89,19 @@ export function parsePostHtml(html: string): Preview {
   return { author: author?.trim() || null, text: text?.trim() || null };
 }
 
-/** Busca a prévia pública do post. Se o LinkedIn bloquear, devolve null e o bot pede o texto. */
+/** Busca a prévia pública do post. Se o LinkedIn bloquear, vem sem texto e o bot pede para colar. */
 export async function fetchPreview(url: string): Promise<Preview | null> {
   try {
     const res = await fetch(url, {
       headers: { "user-agent": "Mozilla/5.0 (compatible; ssi-copilot/1.0)", "accept-language": "pt-BR,pt;q=0.9,en;q=0.8" },
       redirect: "follow",
     });
-    if (!res.ok) return null;
+    // Mesmo bloqueado, o endereço final serve para achar o identificador do post
+    if (!res.ok) return { author: null, text: null, url: res.url || url };
     const preview = parsePostHtml(await res.text());
     // Texto curto demais geralmente é o "Entre no LinkedIn" e não o post
-    if (!preview.text || preview.text.length < 40) return null;
-    return preview;
+    if (!preview.text || preview.text.length < 40) return { author: preview.author, text: null, url: res.url || url };
+    return { ...preview, url: res.url || url };
   } catch {
     return null;
   }
