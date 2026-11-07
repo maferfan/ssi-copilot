@@ -140,6 +140,13 @@ export interface Messenger {
   sendDocument(chatId: number, file: Uint8Array, filename: string, caption?: string): Promise<void>;
 }
 
+/** O "post" salvo não é um post de verdade (ex.: texto da tela de login do LinkedIn). */
+export class NotAPostError extends Error {
+  constructor() {
+    super("o texto salvo não é o do post");
+  }
+}
+
 export interface Drafter {
   draftComment(post: Pick<Post, "url" | "author" | "text">, avoid: string[]): Promise<string>;
   /** Escreve um carrossel; com `previous` + `instructions`, ajusta uma versão anterior. */

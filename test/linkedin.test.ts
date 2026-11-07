@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { decodeEntities, extractLinkedInUrl, parsePostHtml, textAroundUrl } from "../src/linkedin";
+import { describe, expect, it, vi } from "vitest";
+import { decodeEntities, extractLinkedInUrl, fetchPreview, isBoilerplate, isLoginWall, parsePostHtml, textAroundUrl, unwrapLinkedInUrl } from "../src/linkedin";
 import { webhookSecret } from "../src/telegram";
 import { detectLanguage } from "../src/language";
 import { userPrompt } from "../src/claude";
@@ -76,5 +76,40 @@ describe("userPrompt", () => {
     const pt = userPrompt({ url: "u", author: "A", text: "Isso é o que você precisa saber sobre a nova versão." }, []);
     expect(en).toContain("escreva o comentário em inglês");
     expect(pt).toContain("português do Brasil");
+  });
+});
+
+describe("tela de login do LinkedIn", () => {
+  const SIGNUP =
+    "https://www.linkedin.com/signup/cold-join?session_redirect=https%3A%2F%2Fwww%2Elinkedin%2Ecom%2Ffeed%2Fupdate%2Furn%3Ali%3Ashare%3A7515950088356208640%3Futm_source%3Dshare%26utm_medium%3Dmember_desktop%26rcm%3DACoAAC7c7GkB3NExOcOU7p74ekGblJJuNqLhxdQ";
+
+  it("reconhece páginas de login e cadastro", () => {
+    expect(isLoginWall(SIGNUP)).toBe(true);
+    expect(isLoginWall("https://www.linkedin.com/authwall?trk=x")).toBe(true);
+    expect(isLoginWall("https://www.linkedin.com/feed/update/urn:li:share:1/")).toBe(false);
+  });
+
+  it("tira o post de dentro do link de cadastro (o link do print)", () => {
+    const url = unwrapLinkedInUrl(SIGNUP);
+    expect(url).toMatch(/^https:\/\/www\.linkedin\.com\/feed\/update\/urn:li:share:7515950088356208640/);
+    expect(extractLinkedInUrl(`olha ${SIGNUP}`)).toBe(url);
+  });
+
+  it("reconhece o texto padrão do LinkedIn, em português e inglês", () => {
+    expect(isBoilerplate("Mais de 950 milhões de usuários | Gerencie sua identidade profissional.")).toBe(true);
+    expect(isBoilerplate("LinkedIn: Log In or Sign Up")).toBe(true);
+    expect(isBoilerplate("500 million members | Manage your professional identity")).toBe(true);
+    expect(isBoilerplate("Os 5 erros mais comuns em entrevistas técnicas e como evitar.")).toBe(false);
+  });
+
+  it("fetchPreview: se cair no login, não devolve o texto da página e mantém o link do post", async () => {
+    vi.stubGlobal("fetch", async () => ({ ok: true, url: SIGNUP, text: async () => '<meta property="og:description" content="Mais de 950 milhões de usuários | Gerencie sua identidade profissional">' }));
+    try {
+      const p = await fetchPreview("https://www.linkedin.com/feed/update/urn:li:share:7515950088356208640/");
+      expect(p?.text).toBeNull();
+      expect(p?.url).toContain("/feed/update/urn:li:share:7515950088356208640");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

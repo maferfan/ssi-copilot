@@ -1,7 +1,8 @@
+import { NotAPostError } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { Bot, DAILY_LIMIT, nextPublishLabel, parseMetrics } from "../src/bot";
 import { perfil } from "../src/perfil";
-import { click, makeDeps, msg, OWNER } from "./fakes";
+import { click, makeDeps, msg, OWNER, sampleCarousel } from "./fakes";
 
 const URL = "https://www.linkedin.com/posts/fulana_entrevistas-activity-1";
 const LONG_TEXT = "Os 5 erros mais comuns em entrevistas técnicas e como evitar cada um deles.";
@@ -520,5 +521,69 @@ describe("métricas da semana", () => {
     await bot.handleUpdate(click("ca:1"));
     await bot.publishCarousel();
     expect(store.carousels[0].post_url).toBe("https://www.linkedin.com/feed/update/urn:li:share:1/");
+  });
+});
+
+describe("título do documento no LinkedIn", () => {
+  it("sai sem os asteriscos de destaque", async () => {
+    const ctx = makeDeps({ now: () => new Date("2026-11-06T14:00:00Z") });
+    ctx.deps.drafter.draftCarousel = async () => sampleCarousel("Only **42%** of mobile sites have good TTFB");
+    const bot = new Bot(ctx.deps, perfil);
+    await bot.handleUpdate(msg("/start"));
+    await bot.handleUpdate(msg("/carrossel ttfb"));
+    await bot.handleUpdate(click("ca:1"));
+    await bot.publishCarousel();
+    expect(ctx.linkedin.published[0].title).toBe("Only 42% of mobile sites have good TTFB");
+  });
+});
+
+describe("link que cai na tela de login", () => {
+  const POST = "https://www.linkedin.com/feed/update/urn:li:share:7515950088356208640/";
+  const BOILER = "Mais de 950 milhões de usuários | Gerencie sua identidade profissional. Crie sua rede profissional.";
+
+  it("prévia com o texto padrão do LinkedIn: pede o texto em vez de salvar como post", async () => {
+    const { bot, store, messenger } = await setup({ preview: { author: null, text: BOILER, url: POST } });
+    await bot.handleUpdate(msg(POST));
+    expect(store.posts[0]).toMatchObject({ status: "needs_text", text: null, urn: "urn:li:share:7515950088356208640" });
+    expect(messenger.last().html).toContain("cole aqui");
+  });
+
+  it("texto colado sem link vai para o último post salvo", async () => {
+    const { bot, store, messenger } = await setup();
+    await bot.handleUpdate(msg(`${LONG_TEXT}\n${URL}`));
+    await bot.handleUpdate(msg("/fila")); // cancela qualquer espera
+    const pasted = "Este é o texto de verdade do post, colado depois, com mais de oitenta caracteres para valer.";
+    await bot.handleUpdate(msg(pasted));
+    expect(store.posts[0]).toMatchObject({ text: pasted, status: "pending" });
+    expect(messenger.last().html).toContain("Texto salvo no post");
+  });
+
+  it("texto longo sem link e sem post recente continua pedindo o link", async () => {
+    const { bot, messenger } = await setup();
+    await bot.handleUpdate(msg("Um texto comprido qualquer, sem link nenhum e sem post salvo antes, só para testar o caso."));
+    expect(messenger.last().html).toContain("Não encontrei um link");
+  });
+
+  it("post já salvo com o texto padrão: pede o texto sem gastar o Claude", async () => {
+    const { bot, store, messenger, drafter } = await setup();
+    await store.addPost({ url: POST, urn: null, author: null, text: BOILER, status: "pending", createdAt: "2026-11-06T12:00:00Z" });
+    await bot.runDaily();
+    expect(drafter.calls).toHaveLength(0);
+    expect(store.posts[0].status).toBe("needs_text");
+    expect(messenger.last().html).toContain("não era o post");
+    expect(messenger.sent.some((s) => s.buttons)).toBe(false);
+  });
+
+  it("se o Claude disser que não é um post, não mostra sugestão e pede o texto", async () => {
+    const ctx = await setup();
+    ctx.deps.drafter.draftComment = async () => {
+      throw new NotAPostError();
+    };
+    await ctx.bot.handleUpdate(msg(`${LONG_TEXT}\n${URL}`));
+    await ctx.bot.runDaily();
+    expect(ctx.messenger.sent.some((s) => s.buttons)).toBe(false);
+    expect(ctx.store.posts[0].status).toBe("needs_text");
+    await ctx.bot.handleUpdate(msg(LONG_TEXT));
+    expect(ctx.store.posts[0].status).toBe("pending");
   });
 });

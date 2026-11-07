@@ -2,11 +2,37 @@ import type { Preview } from "./types";
 
 const URL_RE = /https?:\/\/(?:[\w-]+\.)?(?:linkedin\.com|lnkd\.in)\/[^\s<>"]+/i;
 
-/** Primeiro link do LinkedIn numa mensagem, já sem pontuação no fim. */
+/** Páginas de login/cadastro para onde o LinkedIn manda quem não está logado. */
+export function isLoginWall(url: string): boolean {
+  return /linkedin\.com\/(signup|login|authwall|uas\/login|checkpoint)/i.test(url);
+}
+
+/**
+ * Link de cadastro/login que embrulha o post ("signup/cold-join?session_redirect=<post>")
+ * vira o link do post. Qualquer outro link volta como veio.
+ */
+export function unwrapLinkedInUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const inner = u.searchParams.get("session_redirect") ?? u.searchParams.get("redirect");
+    if (inner && /^https?:\/\/([\w-]+\.)?linkedin\.com\//i.test(inner) && !isLoginWall(inner)) return inner;
+  } catch {
+    /* não é um link válido */
+  }
+  return url;
+}
+
+/** Texto padrão das páginas públicas do LinkedIn ("Mais de 950 milhões de usuários..."), que não é o post. */
+export function isBoilerplate(text: string | null): boolean {
+  if (!text) return false;
+  return /\d+\s*(milh(õ|o)es|million)\s+(de\s+)?(usu[aá]rios|members)|gerencie sua identidade profissional|manage your professional identity|(entre|cadastre-se) no linkedin|join linkedin|sign (in|up) (to|for) linkedin|log in or sign up/i.test(text);
+}
+
+/** Primeiro link do LinkedIn numa mensagem, já sem pontuação no fim e sem o embrulho de login. */
 export function extractLinkedInUrl(text: string, entityUrls: string[] = []): string | null {
   for (const candidate of [...entityUrls, text]) {
     const m = candidate.match(URL_RE);
-    if (m) return m[0].replace(/[).,;!?]+$/, "");
+    if (m) return unwrapLinkedInUrl(m[0].replace(/[).,;!?]+$/, ""));
   }
   return null;
 }
@@ -96,12 +122,15 @@ export async function fetchPreview(url: string): Promise<Preview | null> {
       headers: { "user-agent": "Mozilla/5.0 (compatible; ssi-copilot/1.0)", "accept-language": "pt-BR,pt;q=0.9,en;q=0.8" },
       redirect: "follow",
     });
+    const final = res.url || url;
+    // Caiu na tela de login/cadastro: o texto é o da página do LinkedIn, não o do post
+    if (isLoginWall(final)) return { author: null, text: null, url: unwrapLinkedInUrl(final) };
     // Mesmo bloqueado, o endereço final serve para achar o identificador do post
-    if (!res.ok) return { author: null, text: null, url: res.url || url };
+    if (!res.ok) return { author: null, text: null, url: final };
     const preview = parsePostHtml(await res.text());
-    // Texto curto demais geralmente é o "Entre no LinkedIn" e não o post
-    if (!preview.text || preview.text.length < 40) return { author: preview.author, text: null, url: res.url || url };
-    return { ...preview, url: res.url || url };
+    // Texto curto ou genérico ("Mais de 950 milhões de usuários...") não é o post
+    if (!preview.text || preview.text.length < 40 || isBoilerplate(preview.text)) return { author: preview.author, text: null, url: final };
+    return { ...preview, url: final };
   } catch {
     return null;
   }

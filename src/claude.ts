@@ -2,9 +2,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Perfil } from "./perfil";
 import { normalizeCarousel } from "./carousel";
 import { detectLanguage } from "./language";
-import type { CarouselChart, CarouselContent, CarouselCost, Drafter, Post } from "./types";
+import { NotAPostError, type CarouselChart, type CarouselContent, type CarouselCost, type Drafter, type Post } from "./types";
 
 export const MODEL = "claude-sonnet-5-5";
+
+/** Resposta combinada para quando o texto não é um post (o bot pede o texto certo em vez de mostrar sugestão). */
+export const NOT_A_POST = "SEM_POST";
 
 export function systemPrompt(p: Perfil): string {
   const exemplos = p.exemplos.length
@@ -19,7 +22,8 @@ Tom:
 ${p.tom.map((t) => `- ${t}`).join("\n")}
 
 Regras:
-${p.regras.map((r) => `- ${r}`).join("\n")}${exemplos}
+${p.regras.map((r) => `- ${r}`).join("\n")}
+- Se o conteúdo dentro de <post> não for um post de verdade (texto de página de login ou cadastro do LinkedIn, texto genérico, vazio ou sem assunto), responda exatamente: ${NOT_A_POST}${exemplos}
 
 ${p.nome} sempre revisa o rascunho antes de publicar. Responda somente com o texto do comentário, sem aspas e sem explicações.`;
 }
@@ -288,6 +292,7 @@ export class ClaudeDrafter implements Drafter {
       .join("")
       .trim();
     if (!text) throw new Error("Resposta vazia do Claude.");
+    if (text.includes(NOT_A_POST)) throw new NotAPostError();
     return text.replace(/^["“]|["”]$/g, "").trim();
   }
 
