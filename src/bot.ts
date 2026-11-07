@@ -1,8 +1,8 @@
 import { detectLanguage } from "./language";
-import { extractLinkedInUrl, extractPostUrn, textAroundUrl } from "./linkedin";
+import { extractLinkedInUrl, extractPostUrn, isBoilerplate, isLoginWall, textAroundUrl } from "./linkedin";
 import type { Perfil } from "./perfil";
 import type { TgUpdate } from "./telegram";
-import type { Awaiting, Carousel, CarouselContent, Deps, InlineButton, Job, LinkedInConnection, Post, WeeklyMetrics } from "./types";
+import { NotAPostError, type Awaiting, type Carousel, type CarouselContent, type Deps, type InlineButton, type Job, type LinkedInConnection, type Post, type WeeklyMetrics } from "./types";
 import { shiftWeek, weekKey, weekLabel, weekStartInstant } from "./week";
 
 /** Quantos posts no máximo viram sugestão a cada rodada das 18h. */
@@ -365,7 +365,31 @@ export class Bot {
       }
     }
 
+    // Texto longo sem link: é o texto do último post salvo (ex.: colado depois que a prévia falhou)
+    if (text.length >= 80 && (await this.attachTextToRecentPost(chatId, text))) return;
+
     await messenger.send(chatId, `Não encontrei um link do LinkedIn nessa mensagem.\n\n${HELP}`);
+  }
+
+  /** Usa o texto colado no post salvo mais recente (últimas 3 h) que ainda não virou comentário. */
+  private async attachTextToRecentPost(chatId: number, text: string): Promise<boolean> {
+    const { store, messenger } = this.deps;
+    const since = new Date(this.deps.now().getTime() - 3 * 3600 * 1000).toISOString();
+    const recent = (await store.listPosts(["needs_text", "pending", "drafted"], 100)).filter((p) => p.created_at >= since).at(-1);
+    if (!recent) return false;
+    await store.updatePost(recent.id, { text, status: "pending", draft: null });
+    await messenger.send(chatId, `Texto salvo no post ${esc(recent.url)} ✔ ${await this.queueLine()}\nMande /agora para gerar a sugestão já.`);
+    return true;
+  }
+
+  /** O texto salvo não é o post: volta a pedir o texto, sem mostrar sugestão. */
+  private async askForRealText(chatId: number, post: Post) {
+    await this.deps.store.updatePost(post.id, { status: "needs_text", text: null, draft: null });
+    await this.setAwaiting({ type: "post_text", postId: post.id });
+    await this.deps.messenger.send(
+      chatId,
+      `⚠️ O texto salvo de ${esc(post.url)} não era o post (o LinkedIn mostrou a tela de login).\nCopie o texto do post e cole aqui na próxima mensagem.`,
+    );
   }
 
   private async queueLine() {
@@ -376,11 +400,12 @@ export class Bot {
   private async savePost(chatId: number, url: string, pastedText: string) {
     const { store, messenger, fetchPreview } = this.deps;
     const preview = await fetchPreview(url);
-    const urn = extractPostUrn(preview?.url ?? url) ?? extractPostUrn(url);
-    const finalUrl = preview?.url && extractPostUrn(preview.url) ? preview.url : url;
+    const resolved = preview?.url && !isLoginWall(preview.url) ? preview.url : null;
+    const urn = extractPostUrn(resolved ?? url) ?? extractPostUrn(url);
+    const finalUrl = resolved && extractPostUrn(resolved) ? resolved : url;
 
     // Texto colado junto com o link vale mais que a prévia (é o post inteiro)
-    const text = pastedText.length >= 40 ? pastedText : preview?.text ?? null;
+    const text = pastedText.length >= 40 ? pastedText : isBoilerplate(preview?.text ?? null) ? null : preview?.text ?? null;
     if (text) {
       await store.addPost({ url: finalUrl, urn, author: preview?.author ?? null, text, status: "pending", createdAt: this.iso() });
       const who = preview?.author ? ` de ${esc(preview.author)}` : "";
@@ -755,7 +780,8 @@ export class Bot {
           await store.updatePost(id, { draft, status: "drafted" });
           await messenger.edit(chatId, messageId, draftCard({ ...post, draft }), draftButtons(id));
         } catch (err) {
-          await messenger.send(chatId, `Não consegui gerar outra versão agora: ${esc(String((err as Error).message))}`);
+          if (err instanceof NotAPostError) await this.askForRealText(chatId, post);
+          else await messenger.send(chatId, `Não consegui gerar outra versão agora: ${esc(String((err as Error).message))}`);
         }
         return;
       }
@@ -820,11 +846,13 @@ export class Bot {
     await messenger.send(chatId, `🕕 <b>Hora de comentar!</b> ${posts.length === 1 ? "1 sugestão" : `${posts.length} sugestões`} a seguir.`);
     for (const [i, post] of posts.entries()) {
       try {
+        if (isBoilerplate(post.text)) throw new NotAPostError();
         const draft = await drafter.draftComment(post, []);
         await store.updatePost(post.id, { draft, status: "drafted" });
         await messenger.send(chatId, draftCard({ ...post, draft }, { i: i + 1, total: posts.length }), draftButtons(post.id));
       } catch (err) {
-        await messenger.send(chatId, `⚠️ Não consegui gerar a sugestão para ${esc(post.url)}: ${esc(String((err as Error).message))}`);
+        if (err instanceof NotAPostError) await this.askForRealText(chatId, post);
+        else await messenger.send(chatId, `⚠️ Não consegui gerar a sugestão para ${esc(post.url)}: ${esc(String((err as Error).message))}`);
       }
     }
   }
