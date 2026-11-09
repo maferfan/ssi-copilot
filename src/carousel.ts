@@ -22,7 +22,7 @@ function validChart(g: CarouselChart | undefined): CarouselChart | undefined {
   if (!g || !Array.isArray(g.dados)) return undefined;
   const dados = g.dados
     .filter((d) => d && String(d.label ?? "").trim() && Number.isFinite(Number(d.valor)))
-    .map((d) => ({ label: String(d.label).trim().slice(0, 40), valor: Number(d.valor) }))
+    .map((d) => ({ label: String(d.label).trim().slice(0, 120), valor: Number(d.valor) }))
     .slice(0, 8);
   if (dados.length < 2) return undefined;
   const fonte = !g.ilustrativo && g.fonte?.url ? { nome: g.fonte.nome.trim(), url: g.fonte.url.trim(), ano: String(g.fonte.ano ?? "").trim() } : null;
@@ -96,13 +96,40 @@ function niceMax(v: number): number {
   return 10 * p;
 }
 
-/** Barras horizontais: rótulos longos cabem à esquerda, valor na ponta da barra. */
+/** Largura média de um caractere do rótulo (Manrope 24px), para medir sem navegador. */
+const LABEL_CHAR_W = 12.5;
+const LABEL_MAX_CHARS = 26; // por linha; acima disso quebra
+const LABEL_MAX_W = 340;
+
+/** Quebra o rótulo em até 2 linhas por palavra; o que sobrar vira "…". */
+export function wrapLabel(label: string, max = LABEL_MAX_CHARS): string[] {
+  const words = label.trim().split(/\s+/);
+  const lines: string[] = [""];
+  for (const w of words) {
+    const cur = lines[lines.length - 1];
+    if (!cur) lines[lines.length - 1] = w;
+    else if (`${cur} ${w}`.length <= max) lines[lines.length - 1] = `${cur} ${w}`;
+    else if (lines.length < 2) lines.push(w);
+    else {
+      lines[1] = `${lines[1]} ${w}`;
+    }
+  }
+  return lines.map((l) => (l.length > max ? `${l.slice(0, max - 1).trimEnd()}…` : l));
+}
+
+/**
+ * Barras horizontais: rótulos à esquerda (até 2 linhas, coluna do tamanho do maior),
+ * valor na ponta da barra. Nada sai da área do gráfico.
+ */
 function barSvg(g: CarouselChart): string {
   const n = g.dados.length;
-  const labelW = 260;
+  const labels = g.dados.map((d) => wrapLabel(d.label));
+  const longest = Math.max(...labels.flat().map((l) => l.length));
+  const labelW = Math.min(LABEL_MAX_W, Math.max(120, Math.ceil(longest * LABEL_CHAR_W) + 24));
+  const twoLines = labels.some((l) => l.length > 1);
   const valueW = 130;
   const gap = 16;
-  const rowH = Math.min(72, (CH - gap * (n - 1)) / n);
+  const rowH = Math.min(twoLines ? 80 : 72, (CH - gap * (n - 1)) / n);
   const h = n * rowH + (n - 1) * gap;
   const max = Math.max(...g.dados.map((d) => d.valor), 0) || 1;
   const barMax = CW - labelW - valueW;
@@ -111,7 +138,10 @@ function barSvg(g: CarouselChart): string {
       const y = i * (rowH + gap);
       const w = Math.max(4, (Math.max(0, d.valor) / max) * barMax);
       const r = Math.min(6, rowH / 2);
-      return `<text x="${labelW - 18}" y="${y + rowH / 2 + 9}" text-anchor="end" class="c-label">${esc(d.label)}</text>
+      const lines = labels[i];
+      const first = y + rowH / 2 + 9 - (lines.length - 1) * 14;
+      const tspans = lines.map((l, k) => `<tspan x="${labelW - 18}" y="${first + k * 28}">${esc(l)}</tspan>`).join("");
+      return `<text text-anchor="end" class="c-label">${tspans}</text>
 <path fill="${ACCENT}" d="M${labelW},${y} H${labelW + w - r} Q${labelW + w},${y} ${labelW + w},${y + r} V${y + rowH - r} Q${labelW + w},${y + rowH} ${labelW + w - r},${y + rowH} H${labelW} Z"/>
 <text x="${labelW + w + 14}" y="${y + rowH / 2 + 9}" class="c-value">${esc(fmtValue(d.valor, g.unidade))}</text>`;
     })
@@ -221,7 +251,8 @@ export function carouselHtml(c: CarouselContent): string {
   .body { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 36px; }
   .with-chart .body { display: grid; grid-template-columns: 1fr ${CW}px; align-items: center; gap: 96px; }
   .col-text { display: flex; flex-direction: column; gap: 28px; }
-  .col-chart { display: flex; flex-direction: column; justify-content: center; }
+  .col-chart { display: flex; flex-direction: column; justify-content: center; min-width: 0; overflow: hidden; }
+  .col-text { min-width: 0; }
   .kicker { color: ${ACCENT}; font-size: 24px; text-transform: uppercase; }
   h1 { font-family: "Instrument Serif", serif; font-weight: 400; font-size: 112px; line-height: 1.02; letter-spacing: -0.01em; }
   h2 { font-family: "Instrument Serif", serif; font-weight: 400; font-size: 80px; line-height: 1.05; }

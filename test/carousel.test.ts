@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { carouselHtml, fmtValue, normalizeCarousel } from "../src/carousel";
+import { carouselHtml, fmtValue, normalizeCarousel, wrapLabel } from "../src/carousel";
 import {
   buildChart,
   ensureCoverChart,
@@ -165,5 +165,23 @@ describe("prompts e custo", () => {
   it("custo pelo preço do Sonnet 5.5 e da busca", () => {
     // 30k entrada × $2/M + 6k saída × $10/M + 5 buscas × $0,01
     expect(costOf({ input: 30000, output: 6000, searches: 5 })).toEqual({ inputTokens: 30000, outputTokens: 6000, searches: 5, usd: 0.17 });
+  });
+});
+
+describe("rótulos das barras", () => {
+  it("quebram em até 2 linhas por palavra; o excesso vira …", () => {
+    expect(wrapLabel("Use AI tools in workflows")).toEqual(["Use AI tools in workflows"]);
+    expect(wrapLabel("Spend more time fixing almost-right AI code")).toEqual(["Spend more time fixing", "almost-right AI code"]);
+    expect(wrapLabel("Would still ask a person when they don't trust AI answers")).toEqual(["Would still ask a person", "when they don't trust AI…"]);
+  });
+
+  it("rótulo longo não é cortado antes de chegar ao gráfico", () => {
+    const c = normalizeCarousel({
+      ...sampleCarousel(),
+      slides: [{ titulo: "a", texto: "", grafico: { tipo: "bar", titulo: "", unidade: "%", dados: [{ label: "Spend more time fixing almost-right AI code", valor: 66 }, { label: "Trust", valor: 29 }], fonte: null, ilustrativo: true } }],
+    });
+    const html = carouselHtml(c);
+    expect(html).toContain(">Spend more time fixing</tspan>");
+    expect(html).toContain(">almost-right AI code</tspan>");
   });
 });
