@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Perfil } from "./perfil";
+import { buildCaption, type PostParts } from "./caption";
 import { normalizeCarousel } from "./carousel";
 import { detectLanguage } from "./language";
 import { NotAPostError, type CarouselChart, type CarouselContent, type CarouselCost, type Drafter, type Post, type TopicIdea } from "./types";
@@ -102,17 +103,36 @@ export function verifyResearch(items: ResearchItem[], seen: Set<string>): Resear
   });
 }
 
-/** Primeiro array JSON do texto (a resposta com busca vem em texto livre). */
+/**
+ * Array JSON da resposta (a resposta com busca vem em texto livre): tenta primeiro um bloco
+ * ```json```, depois cada "[" do texto até achar um array que feche e seja JSON válido.
+ */
 export function parseJsonArray<T>(text: string): T[] {
-  const start = text.indexOf("[");
-  const end = text.lastIndexOf("]");
-  if (start < 0 || end <= start) return [];
-  try {
-    const data = JSON.parse(text.slice(start, end + 1));
-    return Array.isArray(data) ? (data as T[]) : [];
-  } catch {
-    return [];
+  const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map((m) => m[1]);
+  for (const candidate of [...fenced, text]) {
+    for (let start = candidate.indexOf("["); start >= 0; start = candidate.indexOf("[", start + 1)) {
+      let depth = 0;
+      let inString = false;
+      for (let i = start; i < candidate.length; i++) {
+        const ch = candidate[i];
+        if (inString) {
+          if (ch === "\\") i++;
+          else if (ch === '"') inString = false;
+        } else if (ch === '"') inString = true;
+        else if (ch === "[") depth++;
+        else if (ch === "]" && --depth === 0) {
+          try {
+            const data = JSON.parse(candidate.slice(start, i + 1));
+            if (Array.isArray(data) && data.length && typeof data[0] === "object") return data as T[];
+          } catch {
+            /* não era o array certo: tenta o próximo "[" */
+          }
+          break;
+        }
+      }
+    }
   }
+  return [];
 }
 
 export function researchPrompt(topic: string): string {
@@ -152,22 +172,24 @@ Only suggest topics backed by something you found in these searches. Reply at th
 }
 
 /**
- * Só temas cujo site apareceu nos resultados da busca, sem repetidos, no máximo 8.
- * Para tema basta o site (o Claude às vezes cita outra página do mesmo artigo);
- * os números dos gráficos continuam exigindo a página exata (verifyResearch).
+ * Temas sem repetidos, no máximo 8, os de site conferido primeiro.
+ * Conferido = o site do link apareceu nos resultados da busca (para tema basta o site; os
+ * números dos gráficos continuam exigindo a página exata em verifyResearch). Se houver menos
+ * de 4 conferidos, completa com os outros, marcados como não conferidos.
  */
 export function verifyTopics(items: TopicIdea[], seen: Set<string>): TopicIdea[] {
   const hosts = new Set([...seen].map((k) => k.split("/")[0]));
-  const out: TopicIdea[] = [];
+  const valid: TopicIdea[] = [];
   for (const it of items) {
-    const key = it?.url ? urlKey(it.url) : null;
-    const ok = key && (seen.has(key) || hosts.has(key.split("/")[0]));
-    if (!ok || !it.titulo?.trim() || out.some((o) => o.titulo === it.titulo)) continue;
+    if (!it?.titulo?.trim() || valid.some((o) => o.titulo === it.titulo.trim())) continue;
+    const key = it.url ? urlKey(it.url) : null;
+    const conferido = Boolean(key && (seen.has(key) || hosts.has(key.split("/")[0])));
     const area = it.area === "frontend" || it.area === "ai" ? it.area : "software";
-    out.push({ titulo: it.titulo.trim(), area, gancho: (it.gancho ?? "").trim(), porque: (it.porque ?? "").trim(), fonte: (it.fonte ?? "").trim(), url: it.url });
-    if (out.length >= 8) break;
+    valid.push({ titulo: it.titulo.trim(), area, gancho: (it.gancho ?? "").trim(), porque: (it.porque ?? "").trim(), fonte: (it.fonte ?? "").trim(), url: it.url ?? "", conferido });
   }
-  return out;
+  const ok = valid.filter((t) => t.conferido);
+  const rest = ok.length >= 4 ? [] : valid.filter((t) => !t.conferido);
+  return [...ok, ...rest].slice(0, 8);
 }
 
 export function carouselSystemPrompt(p: Perfil): string {
@@ -187,7 +209,13 @@ What a good carousel looks like:
 - Only state numbers in the text that come from a research item you are using on that slide.
 - The last slide wraps up and invites people to comment or follow.
 - Highlight at most one phrase per slide with **double asterisks**.
-- The post caption has 3 to 6 lines: a hook in the first line, why it matters, a question at the end, "Sources are cited under each chart." and up to 3 hashtags.
+- The post text ("post") is assembled by code from parts; write each part well:
+  - "titulo": a strong headline, max 60 characters, no emoji, no hashtags (it is shown in bold).
+  - "gancho": 1 to 2 short sentences, max 160 characters, that make people click "see more": a surprising number, a bold claim or a pain they recognize. Do not repeat the title.
+  - "pontos": 3 or 4 takeaways, max 120 characters each, concrete and skimmable; start with a verb or a number.
+  - "conclusao": one sentence with the main lesson or your opinion.
+  - "pergunta": one specific question people can answer from their own experience (not "what do you think?").
+  - "hashtags": 3 relevant hashtags, without the # sign.
 - Practical, specific, no fluff. Tone: ${p.tom.join(" ")}`;
 }
 
@@ -217,7 +245,7 @@ const CHART_SCHEMA = {
 const CAROUSEL_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["titulo", "subtitulo", "grafico_capa", "imagem_prompt", "slides", "fechamento", "legenda"],
+  required: ["titulo", "subtitulo", "grafico_capa", "imagem_prompt", "slides", "fechamento", "post"],
   properties: {
     titulo: { type: "string", description: "Cover title" },
     subtitulo: { type: "string", description: "One line under the cover title" },
@@ -239,7 +267,19 @@ const CAROUSEL_SCHEMA = {
       required: ["titulo", "texto"],
       properties: { titulo: { type: "string" }, texto: { type: "string" } },
     },
-    legenda: { type: "string", description: "Post caption" },
+    post: {
+      type: "object",
+      additionalProperties: false,
+      required: ["titulo", "gancho", "pontos", "conclusao", "pergunta", "hashtags"],
+      properties: {
+        titulo: { type: "string", description: "Headline, max 60 characters" },
+        gancho: { type: "string", description: "Hook before 'see more', max 160 characters" },
+        pontos: { type: "array", items: { type: "string" }, description: "3 or 4 takeaways" },
+        conclusao: { type: "string" },
+        pergunta: { type: "string" },
+        hashtags: { type: "array", items: { type: "string" }, description: "3 hashtags without #" },
+      },
+    },
   },
 } as const;
 
@@ -339,6 +379,23 @@ export class ClaudeDrafter implements Drafter {
   }
 
   /** Passo 1: busca na web e devolve só os dados cujo link apareceu nos resultados. */
+  async sceneToPrompt(scene: string): Promise<string> {
+    const response = await this.client.beta.messages.create({
+      model: MODEL,
+      max_tokens: 2000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      output_config: { effort: "low" },
+      system:
+        "You turn a scene idea (any language) into one or two English sentences describing only what is visible in an illustration: people, objects, setting, mood. Never ask for text, words, letters, charts or logos in the image. Reply with the description only.",
+      messages: [{ role: "user", content: `<scene>\n${scene}\n</scene>` }],
+    });
+    if (response.stop_reason === "refusal") throw new Error("O Claude não quis descrever essa cena.");
+    const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("").trim();
+    if (!text) throw new Error("Resposta vazia do Claude.");
+    return text;
+  }
+
   /** Conversa com busca na web até a resposta final (a busca pode pausar no meio: pause_turn). */
   private async searchAndAnswer(prompt: string, maxUses: number, what: string) {
     const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: prompt }];
@@ -377,9 +434,12 @@ export class ClaudeDrafter implements Drafter {
     return { items: verifyResearch(parseJsonArray<ResearchItem>(r.text), r.seen), input: r.input, output: r.output, searches: r.searches };
   }
 
-  async suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost }> {
+  async suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost; sugeridos: number; links: number }> {
     const r = await this.searchAndAnswer(topicsPrompt(new Date()), 6, "A busca de temas");
-    return { items: verifyTopics(parseJsonArray<TopicIdea>(r.text), r.seen), custo: costOf(r) };
+    const parsed = parseJsonArray<TopicIdea>(r.text);
+    const items = verifyTopics(parsed, r.seen);
+    console.log("temas", { sugeridos: parsed.length, links: r.seen.size, buscas: r.searches, mantidos: items.length, inicio: r.text.slice(0, 120) });
+    return { items, custo: costOf(r), sugeridos: parsed.length, links: r.seen.size };
   }
 
 
@@ -402,6 +462,7 @@ export class ClaudeDrafter implements Drafter {
     const json = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
     const draft = JSON.parse(json) as Omit<CarouselContent, "slides" | "capa_grafico"> & {
       grafico_capa?: DraftChart;
+      post?: PostParts;
       slides: { titulo: string; texto: string; grafico?: DraftChart }[];
     };
     const custo = costOf({
@@ -414,8 +475,9 @@ export class ClaudeDrafter implements Drafter {
       draft.slides.map((s) => ({ titulo: s.titulo, texto: s.texto, grafico: buildChart(s.grafico, research.items) })),
       research.items,
     );
-    const { grafico_capa: _ignored, ...rest } = draft;
-    return normalizeCarousel({ ...rest, capa_grafico: cover, slides, custo });
+    const { grafico_capa: _ignored, post, ...rest } = draft;
+    const legenda = post ? buildCaption(post) : (rest.legenda ?? "");
+    return normalizeCarousel({ ...rest, legenda, capa_grafico: cover, slides, custo });
   }
 
 }

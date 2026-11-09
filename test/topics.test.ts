@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Bot, topicButtons } from "../src/bot";
 import { carouselHtml, HEIGHT, normalizeCarousel, WIDTH } from "../src/carousel";
-import { topicsPrompt, verifyTopics } from "../src/claude";
+import { parseJsonArray, topicsPrompt, verifyTopics } from "../src/claude";
 import { perfil } from "../src/perfil";
 import type { TopicIdea } from "../src/types";
 import { click, makeDeps, msg, sampleCarousel } from "./fakes";
@@ -50,7 +50,7 @@ describe("/temas", () => {
     expect(ctx.messenger.answers.at(-1)?.text).toContain("expirou");
     ctx.drafter.topicResults = [];
     await ctx.bot.handleUpdate(msg("/temas"));
-    expect(ctx.messenger.last().html).toContain("Não achei temas");
+    expect(ctx.messenger.last().html).toContain("Não achei temas desta vez (o Claude sugeriu 0, a busca trouxe 5 links)");
   });
 
   it("no webhook, /temas vai para a fila", async () => {
@@ -67,19 +67,39 @@ describe("/temas", () => {
 });
 
 describe("verifyTopics", () => {
-  it("aceita tema cujo site apareceu na busca, mesmo em outra página; descarta site que não apareceu e repetidos", () => {
+  it("conferido = site apareceu na busca (mesmo outra página); sem repetidos", () => {
     const seen = new Set(["react.dev/blog/2026/10/compiler", "infoq.com/a"]);
     const out = verifyTopics(
       [
         idea(),
         idea(),
-        idea({ titulo: "Inventado", url: "https://inventado.example/x" }),
         idea({ titulo: "Evals", area: "ai", url: "https://www.infoq.com/a/" }),
         idea({ titulo: "Monolith is back", area: "software", url: "https://www.infoq.com/news/2026/11/monolith/" }),
+        idea({ titulo: "Inventado", url: "https://inventado.example/x" }),
       ],
       seen,
     );
-    expect(out.map((t) => t.titulo)).toEqual(["React Compiler is stable", "Evals", "Monolith is back"]);
+    expect(out.map((t) => [t.titulo, t.conferido])).toEqual([
+      ["React Compiler is stable", true],
+      ["Evals", true],
+      ["Monolith is back", true],
+      ["Inventado", false], // menos de 4 conferidos: completa, marcado
+    ]);
+  });
+
+  it("com 4 ou mais conferidos, os não conferidos ficam de fora", () => {
+    const seen = new Set(["infoq.com/a"]);
+    const ok = ["A", "B", "C", "D"].map((t) => idea({ titulo: t, url: `https://www.infoq.com/${t}` }));
+    const out = verifyTopics([...ok, idea({ titulo: "X", url: "https://inventado.example/x" })], seen);
+    expect(out.map((t) => t.titulo)).toEqual(["A", "B", "C", "D"]);
+  });
+
+  it("lê o array mesmo com texto e [citações] em volta, ou dentro de ```json", () => {
+    const arr = '[{"titulo":"A","url":"https://x.com/a"}]';
+    expect(parseJsonArray(`Achei isto [1] e aquilo [2].\n${arr}\nFontes: [3]`)).toEqual([{ titulo: "A", url: "https://x.com/a" }]);
+    expect(parseJsonArray("Resultado:\n```json\n" + arr + "\n```\nPronto.")).toEqual([{ titulo: "A", url: "https://x.com/a" }]);
+    expect(parseJsonArray('[{"titulo":"com ] dentro"}]')).toEqual([{ titulo: "com ] dentro" }]);
+    expect(parseJsonArray("nada aqui [ ]")).toEqual([]);
   });
 
   it("o pedido cobre as três áreas e pede o motivo em português", () => {

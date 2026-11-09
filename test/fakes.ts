@@ -158,6 +158,11 @@ export function sampleCarousel(titulo = "Como escolher a stack"): CarouselConten
 }
 
 export class FakeDrafter implements Drafter {
+  sceneCalls: string[] = [];
+  async sceneToPrompt(scene: string) {
+    this.sceneCalls.push(scene);
+    return `EN: ${scene}`;
+  }
   topicCalls = 0;
   topicResults: TopicIdea[] = [
     { titulo: "React Compiler is stable", area: "frontend", gancho: "Do you still need useMemo?", porque: "Lançamento recente.", fonte: "React Blog", url: "https://react.dev/blog/x" },
@@ -165,7 +170,7 @@ export class FakeDrafter implements Drafter {
   ];
   async suggestTopics() {
     this.topicCalls++;
-    return { items: this.topicResults, custo: { inputTokens: 1000, outputTokens: 100, searches: 3, usd: 0.04 } };
+    return { items: this.topicResults, custo: { inputTokens: 1000, outputTokens: 100, searches: 3, usd: 0.04 }, sugeridos: this.topicResults.length, links: 5 };
   }
   calls: { text: string | null; avoid: string[] }[] = [];
   carouselCalls: { topic: string; previous?: CarouselContent; instructions?: string }[] = [];

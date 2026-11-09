@@ -68,6 +68,7 @@ const JOB_LABEL: Record<string, string> = {
   daily: "Gerar as sugestões de comentário",
   carousel: "Montar o carrossel",
   topics: "A busca de temas",
+  image: "Trocar a imagem do carrossel",
 };
 
 /** Roda algo agendado e, se der erro, avisa no Telegram em vez de só gravar no log. */

@@ -129,7 +129,7 @@ flowchart LR
 | **TypeScript** | Linguagem | Tipos pegam erros antes do deploy (ex.: um status de post que não existe) | JavaScript puro |
 | **Wrangler** | CLI da Cloudflare | Publica o Worker, aplica migrações e grava segredos; o `wrangler.toml` descreve tudo em texto | Configurar à mão no painel |
 | **GitHub Actions** | CI e deploy | Testa cada pull request e publica cada push na `main`, sem instalar nada no computador | Deploy manual |
-| **Vitest** | Testes | Rápido, roda TypeScript direto; 150 testes em cerca de 1 segundo | Jest |
+| **Vitest** | Testes | Rápido, roda TypeScript direto; 162 testes em cerca de 1 segundo | Jest |
 
 ### Técnicas de engenharia
 
@@ -160,7 +160,11 @@ falta o texto → aguardando 18h → sugestão enviada → aprovado → comentad
 
 **Ilustração da capa com Flux.** O Claude descreve uma cena para a capa (`imagem_prompt`) e o Flux 1 Schnell, no Workers AI da Cloudflare, gera a ilustração, com um estilo fixo nas cores do site e sem texto na imagem ([`src/illustrator.ts`](src/illustrator.ts)). A capa fica com título e gráfico à esquerda e a ilustração na faixa direita. A imagem é guardada com o carrossel para a publicação de sexta; Ajustar reaproveita, Refazer gera outra; se falhar, o carrossel sai só com o gráfico. Cabe na cota grátis diária do Workers AI.
 
-**Temas em alta (`/temas`).** O Claude busca na web o que desenvolvedores estão discutindo nas últimas semanas (lançamentos, pesquisas, debates) em software, front-end e IA, e sugere 8 temas com gancho e motivo. Como no carrossel, só entram temas cujo link apareceu nos resultados da busca. Não são as métricas internas do LinkedIn, que não têm API pública.
+**Texto do post estruturado ([`src/caption.ts`](src/caption.ts)).** O Claude devolve as partes (título, gancho, 3 a 4 pontos, conclusão, pergunta e hashtags) e o código monta sempre no mesmo formato: título em negrito com letras Unicode (o LinkedIn não tem formatação), gancho curto para aparecer antes do "…ver mais", pontos com "→", pergunta com 👉, aviso das fontes e 3 hashtags, dentro do limite de 3.000 caracteres.
+
+**Trocar só a imagem.** O botão 🖼️ Outra imagem gera outra ilustração com a mesma cena ou com uma cena escrita pelo usuário (o Claude passa para inglês), sem reescrever o texto.
+
+**Temas em alta (`/temas`).** O Claude busca na web o que desenvolvedores estão discutindo nas últimas semanas (lançamentos, pesquisas, debates) em software, front-end e IA, e sugere 8 temas com gancho e motivo. Temas cujo site apareceu nos resultados da busca vêm primeiro; se forem menos de 4, os outros aparecem marcados "⚠️ fonte não conferida". Não são as métricas internas do LinkedIn, que não têm API pública.
 
 **Gráficos com fonte conferida, não inventada.** O carrossel é feito em dois passos ([`src/claude.ts`](src/claude.ts)):
 1. *Pesquisa:* o Claude usa a busca na web e devolve de 3 a 6 dados com fonte, ano, link e os números como foram publicados. O código só aceita um dado se o **link apareceu de verdade nos resultados da busca** (ou nas citações), nunca no texto livre do modelo, e se tiver de 2 a 8 números.
