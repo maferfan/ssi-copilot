@@ -172,6 +172,7 @@ export function carouselCard(c: Carousel, when: string): string {
     .join("\n");
   const cg = c.content.capa_grafico;
   const cover = cg ? `\nCapa · 📊 ${cg.fonte ? `${esc(cg.fonte.nome)}${cg.fonte.ano ? ` ${esc(cg.fonte.ano)}` : ""}` : "<i>ilustrativo</i>"}` : "\nCapa · ⚠️ <i>sem gráfico</i>";
+  const art = c.content.capa_imagem ? "\n🖼️ Ilustração gerada na capa" : "";
   const refs = c.content.referencias?.length ?? 0;
   const sources = refs ? `\n🔗 ${refs === 1 ? "1 fonte conferida" : `${refs} fontes conferidas`}, citadas embaixo de cada gráfico.` : "\n⚠️ <i>Nenhuma fonte conferida: todos os gráficos são ilustrativos.</i>";
   const k = c.content.custo;
@@ -180,7 +181,7 @@ export function carouselCard(c: Carousel, when: string): string {
     : "";
   return `🎠 <b>Carrossel</b> · ${esc(c.topic)}
 
-<b>${esc(c.content.titulo.replace(/\*\*/g, ""))}</b>${cover}
+<b>${esc(c.content.titulo.replace(/\*\*/g, ""))}</b>${cover}${art}
 ${slides}
 ${sources}${cost}
 
@@ -610,6 +611,10 @@ export class Bot {
     const { messenger, drafter, renderer, store } = this.deps;
     try {
       const content: CarouselContent = await drafter.draftCarousel(topic, previous?.content, instructions);
+      // Ajuste reaproveita a ilustração; tema novo ou "Refazer" gera outra
+      const keep = instructions ? previous?.content.capa_imagem : undefined;
+      const art = keep ?? (content.imagem_prompt && this.deps.illustrator ? await this.deps.illustrator.generate(content.imagem_prompt) : null);
+      if (art) content.capa_imagem = art;
       const rendered = await renderer.render(content);
       const id = await store.addCarousel({ topic, content, createdAt: this.iso() });
       if (previous && previous.status === "draft") await store.updateCarousel(previous.id, { status: "discarded" });

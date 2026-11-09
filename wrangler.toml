@@ -19,5 +19,9 @@ migrations_dir = "migrations"
 [browser]
 binding = "BROWSER"
 
+# Workers AI: ilustração da capa do carrossel (Flux 1 Schnell, dentro da cota grátis diária)
+[ai]
+binding = "AI"
+
 [observability]
 enabled = true

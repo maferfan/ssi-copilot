@@ -48,6 +48,10 @@ export interface CarouselContent {
   subtitulo: string;
   /** Gráfico da capa (slide 1): o dado mais forte, como gancho. */
   capa_grafico?: CarouselChart;
+  /** Descrição (em inglês) da ilustração da capa, escrita pelo Claude. */
+  imagem_prompt?: string;
+  /** Ilustração da capa gerada pelo Flux (data URL JPEG); fica guardada para a publicação de sexta. */
+  capa_imagem?: string;
   slides: { titulo: string; texto: string; grafico?: CarouselChart }[];
   fechamento: { titulo: string; texto: string };
   legenda: string;
@@ -158,6 +162,11 @@ export interface TopicIdea {
   url: string;
 }
 
+/** Gera a ilustração da capa. Devolve null se não der (o carrossel sai sem ela). */
+export interface Illustrator {
+  generate(prompt: string): Promise<string | null>;
+}
+
 export interface Drafter {
   draftComment(post: Pick<Post, "url" | "author" | "text">, avoid: string[]): Promise<string>;
   /** Escreve um carrossel; com `previous` + `instructions`, ajusta uma versão anterior. */
@@ -211,4 +220,6 @@ export interface Deps {
    * Sem isto (cron e testes), rodam na hora.
    */
   defer?: (job: Job) => Promise<void>;
+  /** Ilustração da capa (Flux na Cloudflare). Sem isto, os carrosséis saem só com gráfico. */
+  illustrator?: Illustrator;
 }

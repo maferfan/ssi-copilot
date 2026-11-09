@@ -51,6 +51,8 @@ export function normalizeCarousel(c: CarouselContent): CarouselContent {
     titulo: c.titulo.trim(),
     subtitulo: (c.subtitulo ?? "").trim(),
     ...(capa ? { capa_grafico: capa } : {}),
+    ...(c.imagem_prompt?.trim() ? { imagem_prompt: c.imagem_prompt.trim() } : {}),
+    ...(c.capa_imagem?.startsWith("data:image/") ? { capa_imagem: c.capa_imagem } : {}),
     slides: slides.map((s) => {
       let grafico = validChart(s.grafico);
       if (grafico && charts >= MAX_CHARTS) grafico = undefined;
@@ -164,8 +166,8 @@ function chartBlock(g: CarouselChart): string {
 export function carouselHtml(c: CarouselContent): string {
   const total = c.slides.length + 2;
   const num = (i: number) => `${String(i).padStart(2, "0")} / ${String(total).padStart(2, "0")}`;
-  const frame = (i: number, body: string, cls = "") => `
-<section class="slide ${cls}">
+  const frame = (i: number, body: string, cls = "", extra = "") => `
+<section class="slide ${cls}">${extra}
   <header><span class="mark">MF</span><span class="mono">${num(i)}</span></header>
   <div class="body">${body}</div>
   <footer><span>Matheus Ferrazza</span><span class="mono">matheusferrazzadev.com</span></footer>
@@ -176,7 +178,15 @@ export function carouselHtml(c: CarouselContent): string {
       ? frame(i + 2, `<div class="col-text"><p class="kicker mono">${String(i + 1).padStart(2, "0")}</p><h2 class="small">${rich(s.titulo)}</h2><p class="text small">${rich(s.texto)}</p></div><div class="col-chart">${chartBlock(s.grafico)}</div>`, "with-chart")
       : frame(i + 2, `<p class="kicker mono">${String(i + 1).padStart(2, "0")}</p><h2>${rich(s.titulo)}</h2><p class="text">${rich(s.texto)}</p>`),
   );
-  const cover = c.capa_grafico
+  const art = c.capa_imagem ? `<img class="cover-art" src="${c.capa_imagem}" alt="">` : "";
+  const cover = c.capa_imagem
+    ? frame(
+        1,
+        `<div class="col-text"><h1 class="small">${rich(c.titulo)}</h1>${c.subtitulo ? `<p class="sub small">${rich(c.subtitulo)}</p>` : ""}${c.capa_grafico ? chartBlock(c.capa_grafico) : ""}<p class="swipe mono">Swipe →</p></div>`,
+        "cover with-image",
+        art,
+      )
+    : c.capa_grafico
     ? frame(1, `<div class="col-text"><h1 class="small">${rich(c.titulo)}</h1>${c.subtitulo ? `<p class="sub small">${rich(c.subtitulo)}</p>` : ""}<p class="swipe mono">Swipe →</p></div><div class="col-chart">${chartBlock(c.capa_grafico)}</div>`, "cover with-chart")
     : frame(1, `<p class="kicker mono">Carousel</p><h1>${rich(c.titulo)}</h1>${c.subtitulo ? `<p class="sub">${rich(c.subtitulo)}</p>` : ""}<p class="swipe mono">Swipe →</p>`, "cover");
 
@@ -232,6 +242,13 @@ export function carouselHtml(c: CarouselContent): string {
   .c-source { font-size: 18px; color: ${MUTE}; }
   .c-source.illustrative { color: ${ACCENT}; }
   h1.small { font-size: 84px; }
+  .cover-art { position: absolute; top: 0; right: 0; width: 760px; height: 100%; object-fit: cover; z-index: 0; }
+  .with-image::before { content: ""; position: absolute; top: 0; bottom: 0; right: 560px; width: 200px; z-index: 1; background: linear-gradient(90deg, #0d0d0e, rgba(13,13,14,0)); }
+  .with-image header, .with-image .body, .with-image footer { position: relative; z-index: 2; }
+  .with-image .body { padding-right: 760px; }
+  .with-image .col-text { gap: 22px; }
+  .with-image .chart svg { width: 100%; max-width: 860px; height: auto; max-height: 340px; }
+  .with-image header .mono, .with-image footer .mono { color: ${BONE}; text-shadow: 0 1px 8px rgba(0,0,0,0.8); }
   .sub.small { font-size: 30px; }
 
 </style></head>

@@ -174,6 +174,7 @@ What a good carousel looks like:
 - Short carousels: 3 to 5 slides in total = cover + 1 to 3 content slides + closing. Prefer 1 content slide (3 slides total); use more only if the topic truly needs it.
 - The cover (slide 1) ALWAYS has a chart ("grafico_capa"): the strongest data point, used as the hook. Short title (up to 8 words) that the chart backs up, one-line subtitle.
 - Content slides: one idea each. Title up to 7 words. Text up to 40 words, or up to 28 words on a slide with a chart.
+- "imagem_prompt": one or two English sentences describing a cover illustration that makes the topic concrete (a scene or a metaphor with people or objects, e.g. "a developer at a desk watching a slow loading bar stretch across a dark room"). Describe only what is seen; never ask for text, words, charts or logos in the image.
 - At most 3 charts in total, counting the cover. Content slides without a chart use mode "none" (text only).
   - mode "research": use a research item that fits (by its id). Its numbers are inserted automatically; do not repeat them in "dados". Prefer this whenever a research item fits.
   - mode "illustrative": only if no research item fits any slide, so the carousel still has a chart. Use a conceptual comparison with obviously relative values (e.g. effort vs impact on a 1-10 scale). It is labelled "Illustrative" on the slide. Never present illustrative values as facts in the text.
@@ -210,10 +211,11 @@ const CHART_SCHEMA = {
 const CAROUSEL_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["titulo", "subtitulo", "grafico_capa", "slides", "fechamento", "legenda"],
+  required: ["titulo", "subtitulo", "grafico_capa", "imagem_prompt", "slides", "fechamento", "legenda"],
   properties: {
     titulo: { type: "string", description: "Cover title" },
     subtitulo: { type: "string", description: "One line under the cover title" },
+    imagem_prompt: { type: "string", description: "Cover illustration description in English, no text in the image" },
     grafico_capa: { ...CHART_SCHEMA, description: "Cover chart (always present: research or illustrative, never none)" },
     slides: {
       type: "array",
