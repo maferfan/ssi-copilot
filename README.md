@@ -58,6 +58,7 @@ Nada é publicado ou enviado no LinkedIn sem eu ver antes. Isso respeita os term
 | `/carrossel <tema>` | Cria o carrossel da semana |
 | `/agora` | Gera as sugestões na hora, sem esperar as 18h |
 | `/agenda` | Carrosséis aprovados, com a sexta de cada um |
+| `/temas` | 8 temas em alta (software, front-end e IA), cada um com gancho, motivo e fonte; um toque monta o carrossel |
 | `/fila` | Mostra os posts salvos e em que etapa cada um está |
 | `/semana` | Resumo da semana (segunda a domingo), comparado com a anterior |
 | `/metricas 120 3400 215` | Registra visualizações do perfil, impressões e seguidores da semana |
@@ -127,7 +128,7 @@ flowchart LR
 | **TypeScript** | Linguagem | Tipos pegam erros antes do deploy (ex.: um status de post que não existe) | JavaScript puro |
 | **Wrangler** | CLI da Cloudflare | Publica o Worker, aplica migrações e grava segredos; o `wrangler.toml` descreve tudo em texto | Configurar à mão no painel |
 | **GitHub Actions** | CI e deploy | Testa cada pull request e publica cada push na `main`, sem instalar nada no computador | Deploy manual |
-| **Vitest** | Testes | Rápido, roda TypeScript direto; 122 testes em cerca de 1 segundo | Jest |
+| **Vitest** | Testes | Rápido, roda TypeScript direto; 140 testes em cerca de 1 segundo | Jest |
 
 ### Técnicas de engenharia
 
@@ -153,6 +154,10 @@ falta o texto → aguardando 18h → sugestão enviada → aprovado → comentad
 - Em "Outra versão", o rascunho anterior vai junto com o pedido de um ângulo diferente.
 
 **OAuth 2.0 com o LinkedIn.** `/conectar` gera um link com um `state` aleatório que vale 15 minutos. Na volta, o Worker confere o `state` (impede conexões forjadas), troca o código por um token de 60 dias e o guarda **criptografado com AES-GCM** ([`src/crypto.ts`](src/crypto.ts)). A senha do LinkedIn nunca passa pelo bot. Uma semana antes de vencer, o bot avisa para renovar.
+
+**Slides 16:9.** Os slides são horizontais (1920×1080), como os outros posts do perfil: preenchem a largura do feed no computador. Nos slides com gráfico, o texto fica à esquerda e o gráfico à direita.
+
+**Temas em alta (`/temas`).** O Claude busca na web o que desenvolvedores estão discutindo nas últimas semanas (lançamentos, pesquisas, debates) em software, front-end e IA, e sugere 8 temas com gancho e motivo. Como no carrossel, só entram temas cujo link apareceu nos resultados da busca. Não são as métricas internas do LinkedIn, que não têm API pública.
 
 **Gráficos com fonte conferida, não inventada.** O carrossel é feito em dois passos ([`src/claude.ts`](src/claude.ts)):
 1. *Pesquisa:* o Claude usa a busca na web e devolve de 3 a 6 dados com fonte, ano, link e os números como foram publicados. O código só aceita um dado se o **link apareceu de verdade nos resultados da busca** (ou nas citações), nunca no texto livre do modelo, e se tiver de 2 a 8 números.

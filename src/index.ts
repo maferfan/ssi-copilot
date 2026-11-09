@@ -60,6 +60,7 @@ function page(title: string, text: string, status = 200) {
 const JOB_LABEL: Record<string, string> = {
   daily: "Gerar as sugestões de comentário",
   carousel: "Montar o carrossel",
+  topics: "A busca de temas",
 };
 
 /** Roda algo agendado e, se der erro, avisa no Telegram em vez de só gravar no log. */

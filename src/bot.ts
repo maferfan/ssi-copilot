@@ -2,7 +2,7 @@ import { detectLanguage } from "./language";
 import { extractLinkedInUrl, extractPostUrn, isBoilerplate, isLoginWall, textAroundUrl } from "./linkedin";
 import type { Perfil } from "./perfil";
 import type { TgUpdate } from "./telegram";
-import { NotAPostError, type Awaiting, type Carousel, type CarouselContent, type Deps, type InlineButton, type Job, type LinkedInConnection, type Post, type WeeklyMetrics } from "./types";
+import { NotAPostError, type Awaiting, type Carousel, type CarouselContent, type Deps, type InlineButton, type Job, type LinkedInConnection, type Post, type TopicIdea, type WeeklyMetrics } from "./types";
 import { shiftWeek, weekKey, weekLabel, weekStartInstant } from "./week";
 
 /** Quantos posts no máximo viram sugestão a cada rodada das 18h. */
@@ -81,7 +81,7 @@ const HELP = `<b>Como funciona</b>
 3. ✅ Aprovar publica o comentário direto no LinkedIn. Também dá para pedir outra versão, editar ou pular.
 
 <b>Carrossel de sexta</b>
-1. Mande <code>/carrossel</code> e o tema, por exemplo: <code>/carrossel como escolher a stack de um site</code>
+1. Mande <code>/carrossel</code> e o tema, por exemplo: <code>/carrossel como escolher a stack de um site</code>. Sem ideia? <code>/temas</code> sugere assuntos em alta.
 2. Eu monto os slides e mando a prévia.
 3. Aprovado, ele entra na próxima sexta livre, às 18h. Se a sexta já tiver um, vai para a seguinte.
 
@@ -91,6 +91,7 @@ Meta: ${WEEKLY_INVITE_GOAL} convites por semana. Mandou alguns? Registre com <co
 <b>Resumo e painel</b>
 Domingo às 18h chega o resumo da semana e eu peço 3 números das Análises do LinkedIn (/metricas). Eles vão para o painel (/painel).
 
+/temas — temas em alta para o próximo carrossel
 /agenda — carrosséis agendados, por sexta
 /conectar — conectar o LinkedIn (vale por 2 meses)
 /agora — gerar as sugestões de comentário agora
@@ -187,6 +188,37 @@ ${sources}${cost}
 ${esc(c.content.legenda)}
 
 Aprovando, ele é publicado ${when}.`;
+}
+
+const AREA: Record<TopicIdea["area"], string> = { software: "⚙️ Software", frontend: "🎨 Front-end", ai: "🤖 IA" };
+
+export function topicsMessage(items: TopicIdea[], usd: number): string {
+  const host = (url: string) => {
+    try {
+      return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+      return url;
+    }
+  };
+  const lines = items.map(
+    (t, i) => `<b>${i + 1}. ${esc(t.titulo)}</b> · ${AREA[t.area]}
+<i>${esc(t.gancho)}</i>
+${esc(t.porque)}
+🔗 ${esc(t.fonte || host(t.url))} (${esc(host(t.url))})`,
+  );
+  return `🔥 <b>Temas em alta</b> (software, front-end e IA)
+
+${lines.join("\n\n")}
+
+Toque no número para montar o carrossel daquele tema.
+<i>Busca na web, não as métricas internas do LinkedIn · ≈ US$ ${usd.toFixed(2)}</i>`;
+}
+
+export function topicButtons(n: number): InlineButton[][] {
+  const buttons = Array.from({ length: n }, (_, i) => ({ text: `🎠 ${i + 1}`, data: `tp:${i}` }));
+  const rows: InlineButton[][] = [];
+  for (let i = 0; i < buttons.length; i += 4) rows.push(buttons.slice(i, i + 4));
+  return rows;
 }
 
 export function carouselButtons(id: number): InlineButton[][] {
@@ -292,6 +324,9 @@ export class Bot {
           return;
         case "conectar":
           await this.sendConnect(chatId);
+          return;
+        case "temas":
+          await this.schedule({ kind: "topics", chatId }, "🔎 Procurando o que está em alta em software, front-end e IA… os temas chegam em 1–2 minutos.");
           return;
         case "agenda":
           await this.sendAgenda(chatId);
@@ -560,6 +595,8 @@ export class Bot {
         const prev = job.previousId ? await this.deps.store.getCarousel(job.previousId) : null;
         return this.createCarousel(job.chatId, job.topic, prev ?? undefined, job.instructions);
       }
+      case "topics":
+        return this.sendTopics(job.chatId);
     }
   }
 
@@ -641,6 +678,37 @@ export class Bot {
     }
     const lines = queue.map((q) => `• ${q.scheduled_for ? fridayLabel(q.scheduled_for, this.deps.now()) : "próxima sexta"} — ${esc(q.content.titulo.replace(/\*\*/g, ""))}`);
     await this.deps.messenger.send(chatId, `📅 <b>Carrosséis agendados</b>\n\n${lines.join("\n")}\n\n<i>Para tirar um da fila, toque em ❌ Descartar no cartão dele.</i>`);
+  }
+
+  // ---------- /temas ----------
+
+  /** Pesquisa os assuntos em alta e manda a lista com um botão por tema. */
+  async sendTopics(chatId: number): Promise<void> {
+    const { drafter, store, messenger } = this.deps;
+    let found;
+    try {
+      found = await drafter.suggestTopics();
+    } catch (err) {
+      await messenger.send(chatId, `⚠️ Não consegui buscar os temas: ${esc(String((err as Error).message))}`);
+      return;
+    }
+    if (found.items.length === 0) {
+      await messenger.send(chatId, "Não achei temas com fonte conferida desta vez. Tente /temas de novo daqui a pouco.");
+      return;
+    }
+    await store.setSetting("topics", JSON.stringify(found.items));
+    await messenger.send(chatId, topicsMessage(found.items, found.custo.usd), topicButtons(found.items.length));
+  }
+
+  private async onTopicChosen(index: number, chatId: number, callbackId: string) {
+    const raw = await this.deps.store.getSetting("topics");
+    const topic = raw ? (JSON.parse(raw) as TopicIdea[])[index] : undefined;
+    if (!topic) {
+      await this.deps.messenger.answerCallback(callbackId, "Essa lista expirou. Mande /temas de novo.");
+      return;
+    }
+    await this.deps.messenger.answerCallback(callbackId, "Montando o carrossel…");
+    await this.requestCarousel(chatId, topic.gancho ? `${topic.titulo} — ${topic.gancho}` : topic.titulo);
   }
 
   /** Sexta, 18h: publica o carrossel agendado para hoje. */
@@ -755,6 +823,7 @@ export class Bot {
       await messenger.answerCallback(cb.id);
       return;
     }
+    if (action === "tp") return this.onTopicChosen(id, chatId, cb.id);
     if (action.startsWith("c")) return this.onCarouselButton(action, id, chatId, messageId, cb.id);
 
     const post = await store.getPost(id);
