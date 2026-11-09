@@ -124,6 +124,8 @@ export interface Store {
   /** Pega os trabalhos pendentes e marca como "running" (cada um roda uma vez só). */
   takeJobs(limit: number): Promise<{ id: number; job: Job }[]>;
   finishJob(id: number, ok: boolean): Promise<void>;
+  /** Quantos trabalhos há em cada estado (pending, running, done, failed). */
+  jobCounts(): Promise<Record<string, number>>;
   logAction(type: ActionType, refId: number | null, createdAt: string, value?: number | null): Promise<void>;
   countActionsSince(sinceIso: string): Promise<Record<string, number>>;
 }
@@ -220,6 +222,8 @@ export interface Deps {
    * Sem isto (cron e testes), rodam na hora.
    */
   defer?: (job: Job) => Promise<void>;
+  /** Versão publicada (commit), para o /status. */
+  version?: string;
   /** Ilustração da capa (Flux na Cloudflare). Sem isto, os carrosséis saem só com gráfico. */
   illustrator?: Illustrator;
 }

@@ -93,6 +93,7 @@ Domingo às 18h chega o resumo da semana e eu peço 3 números das Análises do 
 
 /temas — temas em alta para o próximo carrossel
 /agenda — carrosséis agendados, por sexta
+/status — versão do bot e situação da fila
 /conectar — conectar o LinkedIn (vale por 2 meses)
 /agora — gerar as sugestões de comentário agora
 /fila — ver os posts salvos
@@ -339,8 +340,15 @@ export class Bot {
             await messenger.send(chatId, "Qual o tema do carrossel? Mande na próxima mensagem. 🎠");
           }
           return;
-        default:
+        case "ajuda":
+        case "help":
           await messenger.send(chatId, HELP);
+          return;
+        case "status":
+          await this.sendStatus(chatId);
+          return;
+        default:
+          await messenger.send(chatId, `Não conheço o comando <code>/${esc(cmd[1])}</code>.\n\n${HELP}`);
           return;
       }
     }
@@ -683,6 +691,30 @@ export class Bot {
     }
     const lines = queue.map((q) => `• ${q.scheduled_for ? fridayLabel(q.scheduled_for, this.deps.now()) : "próxima sexta"} — ${esc(q.content.titulo.replace(/\*\*/g, ""))}`);
     await this.deps.messenger.send(chatId, `📅 <b>Carrosséis agendados</b>\n\n${lines.join("\n")}\n\n<i>Para tirar um da fila, toque em ❌ Descartar no cartão dele.</i>`);
+  }
+
+  // ---------- /status ----------
+
+  /** Versão publicada e situação da fila: para descobrir se algo travou sem abrir a Cloudflare. */
+  private async sendStatus(chatId: number) {
+    const { store, messenger } = this.deps;
+    const counts = await store.jobCounts();
+    const beat = await store.getSetting("queue_heartbeat");
+    const ago = beat ? Math.round((this.deps.now().getTime() - new Date(beat).getTime()) / 60000) : null;
+    const queue =
+      ago === null
+        ? "⚠️ a fila nunca rodou (o agendamento de cada minuto não está ativo)"
+        : ago <= 2
+          ? `✅ rodou há ${ago} min`
+          : `⚠️ não roda há ${ago} min (o agendamento de cada minuto parou)`;
+    await messenger.send(
+      chatId,
+      `🩺 <b>Status</b>
+
+Versão: <code>${esc(this.deps.version ?? "desconhecida")}</code>
+Fila: ${queue}
+Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · ${counts.failed ?? 0} com erro · ${counts.done ?? 0} feitos`,
+    );
   }
 
   // ---------- /temas ----------

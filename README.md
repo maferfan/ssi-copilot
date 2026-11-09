@@ -58,6 +58,7 @@ Nada é publicado ou enviado no LinkedIn sem eu ver antes. Isso respeita os term
 | `/carrossel <tema>` | Cria o carrossel da semana |
 | `/agora` | Gera as sugestões na hora, sem esperar as 18h |
 | `/agenda` | Carrosséis aprovados, com a sexta de cada um |
+| `/status` | Versão publicada, quando a fila rodou pela última vez e quantos pedidos estão esperando ou com erro |
 | `/temas` | 8 temas em alta (software, front-end e IA), cada um com gancho, motivo e fonte; um toque monta o carrossel |
 | `/fila` | Mostra os posts salvos e em que etapa cada um está |
 | `/semana` | Resumo da semana (segunda a domingo), comparado com a anterior |
@@ -128,7 +129,7 @@ flowchart LR
 | **TypeScript** | Linguagem | Tipos pegam erros antes do deploy (ex.: um status de post que não existe) | JavaScript puro |
 | **Wrangler** | CLI da Cloudflare | Publica o Worker, aplica migrações e grava segredos; o `wrangler.toml` descreve tudo em texto | Configurar à mão no painel |
 | **GitHub Actions** | CI e deploy | Testa cada pull request e publica cada push na `main`, sem instalar nada no computador | Deploy manual |
-| **Vitest** | Testes | Rápido, roda TypeScript direto; 147 testes em cerca de 1 segundo | Jest |
+| **Vitest** | Testes | Rápido, roda TypeScript direto; 150 testes em cerca de 1 segundo | Jest |
 
 ### Técnicas de engenharia
 
