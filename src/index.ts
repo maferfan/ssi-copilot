@@ -2,6 +2,7 @@ import type { BrowserWorker } from "@cloudflare/puppeteer";
 import { Bot } from "./bot";
 import { BrowserRenderer } from "./carousel";
 import { ClaudeDrafter } from "./claude";
+import { FluxIllustrator } from "./illustrator";
 import { CRONS } from "./crons";
 import { dashboardHtml, loadDashboard } from "./dashboard";
 import { fetchPreview } from "./linkedin";
@@ -13,6 +14,8 @@ import { TelegramMessenger, webhookSecret, type TgUpdate } from "./telegram";
 export interface Env {
   DB: D1Database;
   BROWSER: BrowserWorker;
+  /** Workers AI: ilustração da capa (Flux). */
+  AI: Ai;
   TELEGRAM_BOT_TOKEN: string;
   ANTHROPIC_API_KEY: string;
   LINKEDIN_CLIENT_ID?: string;
@@ -45,6 +48,7 @@ function makeBot(env: Env, web = false) {
       now,
       ownerChatId: env.OWNER_CHAT_ID ? Number(env.OWNER_CHAT_ID) : undefined,
       defer: web ? (job) => store.enqueueJob(job, now().toISOString()) : undefined,
+      illustrator: env.AI ? new FluxIllustrator(env.AI) : undefined,
     },
     perfil,
   );
@@ -60,6 +64,7 @@ function page(title: string, text: string, status = 200) {
 const JOB_LABEL: Record<string, string> = {
   daily: "Gerar as sugestões de comentário",
   carousel: "Montar o carrossel",
+  topics: "A busca de temas",
 };
 
 /** Roda algo agendado e, se der erro, avisa no Telegram em vez de só gravar no log. */

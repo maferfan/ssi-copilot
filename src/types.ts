@@ -48,6 +48,10 @@ export interface CarouselContent {
   subtitulo: string;
   /** Gráfico da capa (slide 1): o dado mais forte, como gancho. */
   capa_grafico?: CarouselChart;
+  /** Descrição (em inglês) da ilustração da capa, escrita pelo Claude. */
+  imagem_prompt?: string;
+  /** Ilustração da capa gerada pelo Flux (data URL JPEG); fica guardada para a publicação de sexta. */
+  capa_imagem?: string;
   slides: { titulo: string; texto: string; grafico?: CarouselChart }[];
   fechamento: { titulo: string; texto: string };
   legenda: string;
@@ -86,7 +90,8 @@ export interface WeeklyMetrics {
 /** Trabalho longo que o webhook deixa para o cron de cada minuto. */
 export type Job =
   | { kind: "daily" }
-  | { kind: "carousel"; chatId: number; topic: string; previousId?: number; instructions?: string };
+  | { kind: "carousel"; chatId: number; topic: string; previousId?: number; instructions?: string }
+  | { kind: "topics"; chatId: number };
 
 export type ActionType = "comment" | "post" | "invite" | "ssi";
 
@@ -147,10 +152,27 @@ export class NotAPostError extends Error {
   }
 }
 
+/** Tema sugerido pelo /temas, com a fonte que mostra que o assunto está em alta. */
+export interface TopicIdea {
+  titulo: string;
+  area: "software" | "frontend" | "ai";
+  gancho: string;
+  porque: string;
+  fonte: string;
+  url: string;
+}
+
+/** Gera a ilustração da capa. Devolve null se não der (o carrossel sai sem ela). */
+export interface Illustrator {
+  generate(prompt: string): Promise<string | null>;
+}
+
 export interface Drafter {
   draftComment(post: Pick<Post, "url" | "author" | "text">, avoid: string[]): Promise<string>;
   /** Escreve um carrossel; com `previous` + `instructions`, ajusta uma versão anterior. */
   draftCarousel(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent>;
+  /** Pesquisa na web os assuntos em alta (software, front-end, IA) e sugere temas de carrossel. */
+  suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost }>;
 }
 
 export interface RenderedCarousel {
@@ -198,4 +220,6 @@ export interface Deps {
    * Sem isto (cron e testes), rodam na hora.
    */
   defer?: (job: Job) => Promise<void>;
+  /** Ilustração da capa (Flux na Cloudflare). Sem isto, os carrosséis saem só com gráfico. */
+  illustrator?: Illustrator;
 }

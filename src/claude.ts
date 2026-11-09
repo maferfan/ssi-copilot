@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Perfil } from "./perfil";
 import { normalizeCarousel } from "./carousel";
 import { detectLanguage } from "./language";
-import { NotAPostError, type CarouselChart, type CarouselContent, type CarouselCost, type Drafter, type Post } from "./types";
+import { NotAPostError, type CarouselChart, type CarouselContent, type CarouselCost, type Drafter, type Post, type TopicIdea } from "./types";
 
 export const MODEL = "claude-sonnet-5-5";
 
@@ -130,6 +130,40 @@ Reply at the end with ONLY a JSON array, no text before or after:
 [{"id": "R1", "fonte": "publisher or report name", "ano": "2025", "url": "https://...", "achado": "one-sentence finding", "tipo": "bar" | "line", "unidade": "%" or "ms" or "" , "dados": [{"label": "...", "valor": 42}]}]`;
 }
 
+// ---------- /temas: assuntos em alta ----------
+
+export function topicsPrompt(today: Date): string {
+  const date = today.toISOString().slice(0, 10);
+  return `Today is ${date}. Find what software engineers are actively discussing right now (last ~4 weeks) in three areas: software engineering, frontend, and AI engineering (LLM apps, agents, evals, AI-assisted coding).
+
+Search recent news, release notes, surveys, engineering blogs and widely shared discussions (e.g. Hacker News, dev.to, The Pragmatic Engineer, InfoQ, official framework/tool blogs, LinkedIn News pages that are public).
+
+Suggest 8 carousel topics for a web developer's LinkedIn, mixing the three areas. Prefer topics that spark discussion: a recent release or change people must react to, a surprising number, a common mistake, a debate with two sides. Avoid generic evergreen advice.
+
+For each topic give:
+- "titulo": a carousel topic in English, specific (max 10 words)
+- "area": "software" | "frontend" | "ai"
+- "gancho": the hook in English: the claim or question that opens the post (max 20 words)
+- "porque": in Brazilian Portuguese, one sentence on why it is engaging now
+- "fonte": the publication or site that shows it is current
+- "url": the page you found it on
+
+Reply at the end with ONLY a JSON array, no text before or after.`;
+}
+
+/** Só temas com link conferido na busca, sem repetidos, no máximo 8. */
+export function verifyTopics(items: TopicIdea[], seen: Set<string>): TopicIdea[] {
+  const out: TopicIdea[] = [];
+  for (const it of items) {
+    const key = it?.url ? urlKey(it.url) : null;
+    if (!key || !seen.has(key) || !it.titulo?.trim() || out.some((o) => o.titulo === it.titulo)) continue;
+    const area = it.area === "frontend" || it.area === "ai" ? it.area : "software";
+    out.push({ titulo: it.titulo.trim(), area, gancho: (it.gancho ?? "").trim(), porque: (it.porque ?? "").trim(), fonte: (it.fonte ?? "").trim(), url: it.url });
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
 export function carouselSystemPrompt(p: Perfil): string {
   return `You write LinkedIn carousels (slide posts) for ${p.nome}, always in English.
 
@@ -140,6 +174,7 @@ What a good carousel looks like:
 - Short carousels: 3 to 5 slides in total = cover + 1 to 3 content slides + closing. Prefer 1 content slide (3 slides total); use more only if the topic truly needs it.
 - The cover (slide 1) ALWAYS has a chart ("grafico_capa"): the strongest data point, used as the hook. Short title (up to 8 words) that the chart backs up, one-line subtitle.
 - Content slides: one idea each. Title up to 7 words. Text up to 40 words, or up to 28 words on a slide with a chart.
+- "imagem_prompt": one or two English sentences describing a cover illustration that makes the topic concrete (a scene or a metaphor with people or objects, e.g. "a developer at a desk watching a slow loading bar stretch across a dark room"). Describe only what is seen; never ask for text, words, charts or logos in the image.
 - At most 3 charts in total, counting the cover. Content slides without a chart use mode "none" (text only).
   - mode "research": use a research item that fits (by its id). Its numbers are inserted automatically; do not repeat them in "dados". Prefer this whenever a research item fits.
   - mode "illustrative": only if no research item fits any slide, so the carousel still has a chart. Use a conceptual comparison with obviously relative values (e.g. effort vs impact on a 1-10 scale). It is labelled "Illustrative" on the slide. Never present illustrative values as facts in the text.
@@ -176,10 +211,11 @@ const CHART_SCHEMA = {
 const CAROUSEL_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["titulo", "subtitulo", "grafico_capa", "slides", "fechamento", "legenda"],
+  required: ["titulo", "subtitulo", "grafico_capa", "imagem_prompt", "slides", "fechamento", "legenda"],
   properties: {
     titulo: { type: "string", description: "Cover title" },
     subtitulo: { type: "string", description: "One line under the cover title" },
+    imagem_prompt: { type: "string", description: "Cover illustration description in English, no text in the image" },
     grafico_capa: { ...CHART_SCHEMA, description: "Cover chart (always present: research or illustrative, never none)" },
     slides: {
       type: "array",
@@ -297,8 +333,9 @@ export class ClaudeDrafter implements Drafter {
   }
 
   /** Passo 1: busca na web e devolve só os dados cujo link apareceu nos resultados. */
-  private async research(topic: string): Promise<{ items: ResearchItem[]; input: number; output: number; searches: number }> {
-    const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: researchPrompt(topic) }];
+  /** Conversa com busca na web até a resposta final (a busca pode pausar no meio: pause_turn). */
+  private async searchAndAnswer(prompt: string, maxUses: number, what: string) {
+    const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: prompt }];
     const content: unknown[] = [];
     let input = 0;
     let output = 0;
@@ -310,7 +347,7 @@ export class ClaudeDrafter implements Drafter {
         betas: ["server-side-fallback-2026-07-01"],
         fallbacks: "default",
         output_config: { effort: "medium" },
-        tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 6 }],
+        tools: [{ type: "web_search_20260209", name: "web_search", max_uses: maxUses }],
         messages,
       });
       input += response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0);
@@ -321,13 +358,24 @@ export class ClaudeDrafter implements Drafter {
         messages.push({ role: "assistant", content: response.content });
         continue;
       }
-      if (response.stop_reason === "refusal") throw new Error("A pesquisa sobre esse tema foi recusada.");
+      if (response.stop_reason === "refusal") throw new Error(`${what} foi recusada.`);
       const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
-      const items = verifyResearch(parseJsonArray<ResearchItem>(text), searchedUrls(content));
-      return { items, input, output, searches };
+      return { text, seen: searchedUrls(content), input, output, searches };
     }
-    throw new Error("A pesquisa não terminou.");
+    throw new Error(`${what} não terminou.`);
   }
+
+  /** Passo 1 do carrossel: dados com fonte, só os que tiveram o link conferido na busca. */
+  private async research(topic: string): Promise<{ items: ResearchItem[]; input: number; output: number; searches: number }> {
+    const r = await this.searchAndAnswer(researchPrompt(topic), 6, "A pesquisa sobre esse tema");
+    return { items: verifyResearch(parseJsonArray<ResearchItem>(r.text), r.seen), input: r.input, output: r.output, searches: r.searches };
+  }
+
+  async suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost }> {
+    const r = await this.searchAndAnswer(topicsPrompt(new Date()), 6, "A busca de temas");
+    return { items: verifyTopics(parseJsonArray<TopicIdea>(r.text), r.seen), custo: costOf(r) };
+  }
+
 
   async draftCarousel(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent> {
     // Ajuste reaproveita as fontes já conferidas; tema novo ou "refazer" pesquisa de novo

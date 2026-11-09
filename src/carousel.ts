@@ -2,7 +2,9 @@ import puppeteer, { type BrowserWorker } from "@cloudflare/puppeteer";
 import type { CarouselChart, CarouselContent, Reference, RenderedCarousel, Renderer } from "./types";
 
 /** Tamanho de cada slide: quadrado, como o LinkedIn exibe carrosséis. */
-export const SIZE = 1080;
+/** Slides horizontais 16:9: preenchem a largura do feed no computador, como os seus outros posts. */
+export const WIDTH = 1920;
+export const HEIGHT = 1080;
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -49,6 +51,8 @@ export function normalizeCarousel(c: CarouselContent): CarouselContent {
     titulo: c.titulo.trim(),
     subtitulo: (c.subtitulo ?? "").trim(),
     ...(capa ? { capa_grafico: capa } : {}),
+    ...(c.imagem_prompt?.trim() ? { imagem_prompt: c.imagem_prompt.trim() } : {}),
+    ...(c.capa_imagem?.startsWith("data:image/") ? { capa_imagem: c.capa_imagem } : {}),
     slides: slides.map((s) => {
       let grafico = validChart(s.grafico);
       if (grafico && charts >= MAX_CHARTS) grafico = undefined;
@@ -71,8 +75,8 @@ export function normalizeCarousel(c: CarouselContent): CarouselContent {
 
 // ---------- gráficos dos slides (SVG) ----------
 
-const CW = SIZE - 176; // largura útil do slide
-const CH = 400;
+const CW = 860; // largura da coluna do gráfico (o texto fica à esquerda)
+const CH = 500;
 const ACCENT = "#d6ac72";
 const BONE = "#ece7de";
 const MUTE = "rgba(236,231,222,0.45)";
@@ -95,10 +99,10 @@ function niceMax(v: number): number {
 /** Barras horizontais: rótulos longos cabem à esquerda, valor na ponta da barra. */
 function barSvg(g: CarouselChart): string {
   const n = g.dados.length;
-  const labelW = 300;
+  const labelW = 260;
   const valueW = 130;
-  const gap = 14;
-  const rowH = Math.min(64, (CH - gap * (n - 1)) / n);
+  const gap = 16;
+  const rowH = Math.min(72, (CH - gap * (n - 1)) / n);
   const h = n * rowH + (n - 1) * gap;
   const max = Math.max(...g.dados.map((d) => d.valor), 0) || 1;
   const barMax = CW - labelW - valueW;
@@ -162,8 +166,8 @@ function chartBlock(g: CarouselChart): string {
 export function carouselHtml(c: CarouselContent): string {
   const total = c.slides.length + 2;
   const num = (i: number) => `${String(i).padStart(2, "0")} / ${String(total).padStart(2, "0")}`;
-  const frame = (i: number, body: string, cls = "") => `
-<section class="slide ${cls}">
+  const frame = (i: number, body: string, cls = "", extra = "") => `
+<section class="slide ${cls}">${extra}
   <header><span class="mark">MF</span><span class="mono">${num(i)}</span></header>
   <div class="body">${body}</div>
   <footer><span>Matheus Ferrazza</span><span class="mono">matheusferrazzadev.com</span></footer>
@@ -171,11 +175,19 @@ export function carouselHtml(c: CarouselContent): string {
 
   const content = c.slides.map((s, i) =>
     s.grafico
-      ? frame(i + 2, `<p class="kicker mono">${String(i + 1).padStart(2, "0")}</p><h2 class="small">${rich(s.titulo)}</h2><p class="text small">${rich(s.texto)}</p>${chartBlock(s.grafico)}`, "with-chart")
+      ? frame(i + 2, `<div class="col-text"><p class="kicker mono">${String(i + 1).padStart(2, "0")}</p><h2 class="small">${rich(s.titulo)}</h2><p class="text small">${rich(s.texto)}</p></div><div class="col-chart">${chartBlock(s.grafico)}</div>`, "with-chart")
       : frame(i + 2, `<p class="kicker mono">${String(i + 1).padStart(2, "0")}</p><h2>${rich(s.titulo)}</h2><p class="text">${rich(s.texto)}</p>`),
   );
-  const cover = c.capa_grafico
-    ? frame(1, `<h1 class="small">${rich(c.titulo)}</h1>${c.subtitulo ? `<p class="sub small">${rich(c.subtitulo)}</p>` : ""}${chartBlock(c.capa_grafico)}<p class="swipe mono">Swipe →</p>`, "cover with-chart")
+  const art = c.capa_imagem ? `<img class="cover-art" src="${c.capa_imagem}" alt="">` : "";
+  const cover = c.capa_imagem
+    ? frame(
+        1,
+        `<div class="col-text"><h1 class="small">${rich(c.titulo)}</h1>${c.subtitulo ? `<p class="sub small">${rich(c.subtitulo)}</p>` : ""}${c.capa_grafico ? chartBlock(c.capa_grafico) : ""}<p class="swipe mono">Swipe →</p></div>`,
+        "cover with-image",
+        art,
+      )
+    : c.capa_grafico
+    ? frame(1, `<div class="col-text"><h1 class="small">${rich(c.titulo)}</h1>${c.subtitulo ? `<p class="sub small">${rich(c.subtitulo)}</p>` : ""}<p class="swipe mono">Swipe →</p></div><div class="col-chart">${chartBlock(c.capa_grafico)}</div>`, "cover with-chart")
     : frame(1, `<p class="kicker mono">Carousel</p><h1>${rich(c.titulo)}</h1>${c.subtitulo ? `<p class="sub">${rich(c.subtitulo)}</p>` : ""}<p class="swipe mono">Swipe →</p>`, "cover");
 
   const slides = [
@@ -192,11 +204,11 @@ export function carouselHtml(c: CarouselContent): string {
 <html lang="en"><head><meta charset="utf-8">
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  @page { size: ${SIZE}px ${SIZE}px; margin: 0; }
+  @page { size: ${WIDTH}px ${HEIGHT}px; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { background: #0d0d0e; }
   .slide {
-    width: ${SIZE}px; height: ${SIZE}px; padding: 88px; position: relative; overflow: hidden;
+    width: ${WIDTH}px; height: ${HEIGHT}px; padding: 80px 112px; position: relative; overflow: hidden;
     display: flex; flex-direction: column; justify-content: space-between;
     background: radial-gradient(120% 80% at 100% 0%, #1c1c1f 0%, #0d0d0e 60%);
     color: ${BONE}; font-family: "Manrope", system-ui, sans-serif;
@@ -207,13 +219,15 @@ export function carouselHtml(c: CarouselContent): string {
   .mark { font-family: "Instrument Serif", serif; font-style: italic; font-size: 44px; color: ${BONE}; }
   .mono { font-family: "JetBrains Mono", monospace; letter-spacing: 0.04em; }
   .body { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 36px; }
-  .with-chart .body { gap: 22px; justify-content: flex-start; padding-top: 28px; }
+  .with-chart .body { display: grid; grid-template-columns: 1fr ${CW}px; align-items: center; gap: 96px; }
+  .col-text { display: flex; flex-direction: column; gap: 28px; }
+  .col-chart { display: flex; flex-direction: column; justify-content: center; }
   .kicker { color: ${ACCENT}; font-size: 24px; text-transform: uppercase; }
   h1 { font-family: "Instrument Serif", serif; font-weight: 400; font-size: 112px; line-height: 1.02; letter-spacing: -0.01em; }
   h2 { font-family: "Instrument Serif", serif; font-weight: 400; font-size: 80px; line-height: 1.05; }
   h2.small { font-size: 60px; }
-  .sub { font-size: 34px; line-height: 1.4; color: rgba(236,231,222,0.62); max-width: 820px; }
-  .text { font-size: 36px; line-height: 1.5; color: rgba(236,231,222,0.82); max-width: 860px; }
+  .sub { font-size: 34px; line-height: 1.4; color: rgba(236,231,222,0.62); max-width: 1200px; }
+  .text { font-size: 36px; line-height: 1.5; color: rgba(236,231,222,0.82); max-width: 1300px; }
   .text.small { font-size: 28px; line-height: 1.45; }
   .hl { font-style: normal; color: ${ACCENT}; }
   h1 .hl, h2 .hl { font-style: italic; }
@@ -227,9 +241,15 @@ export function carouselHtml(c: CarouselContent): string {
   .c-tick { fill: ${MUTE}; font: 400 20px "JetBrains Mono", monospace; }
   .c-source { font-size: 18px; color: ${MUTE}; }
   .c-source.illustrative { color: ${ACCENT}; }
-  .cover.with-chart .body { justify-content: center; padding-top: 0; }
-  h1.small { font-size: 76px; }
-  .sub.small { font-size: 28px; }
+  h1.small { font-size: 84px; }
+  .cover-art { position: absolute; top: 0; right: 0; width: 760px; height: 100%; object-fit: cover; z-index: 0; }
+  .with-image::before { content: ""; position: absolute; top: 0; bottom: 0; right: 560px; width: 200px; z-index: 1; background: linear-gradient(90deg, #0d0d0e, rgba(13,13,14,0)); }
+  .with-image header, .with-image .body, .with-image footer { position: relative; z-index: 2; }
+  .with-image .body { padding-right: 760px; }
+  .with-image .col-text { gap: 22px; }
+  .with-image .chart svg { width: 100%; max-width: 860px; height: auto; max-height: 340px; }
+  .with-image header .mono, .with-image footer .mono { color: ${BONE}; text-shadow: 0 1px 8px rgba(0,0,0,0.8); }
+  .sub.small { font-size: 30px; }
 
 </style></head>
 <body>${slides.join("")}</body></html>`;
@@ -252,13 +272,13 @@ export class BrowserRenderer implements Renderer {
     const browser = await puppeteer.launch(this.browser);
     try {
       const page = await browser.newPage();
-      await page.setViewport({ width: SIZE, height: SIZE, deviceScaleFactor: 1 });
+      await page.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 1 });
       // Não espera a rede ficar parada (o Google Fonts às vezes demora e estourava 30 s):
       // só o carregamento da página, e no máximo 8 s pelas fontes; sem elas, usa as de reserva
       await page.setContent(carouselHtml(c), { waitUntil: "load", timeout: 45_000 });
       await page.evaluate("Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 8000))])");
 
-      const pdf = await page.pdf({ width: `${SIZE}px`, height: `${SIZE}px`, printBackground: true, pageRanges: "" });
+      const pdf = await page.pdf({ width: `${WIDTH}px`, height: `${HEIGHT}px`, printBackground: true, pageRanges: "" });
       const images: Uint8Array[] = [];
       for (const slide of await page.$$(".slide")) {
         images.push(new Uint8Array((await slide.screenshot({ type: "png" })) as Uint8Array));
