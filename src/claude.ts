@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Perfil } from "./perfil";
+import { buildCaption, type PostParts } from "./caption";
 import { normalizeCarousel } from "./carousel";
 import { detectLanguage } from "./language";
 import { NotAPostError, type CarouselChart, type CarouselContent, type CarouselCost, type Drafter, type Post, type TopicIdea } from "./types";
@@ -208,7 +209,13 @@ What a good carousel looks like:
 - Only state numbers in the text that come from a research item you are using on that slide.
 - The last slide wraps up and invites people to comment or follow.
 - Highlight at most one phrase per slide with **double asterisks**.
-- The post caption has 3 to 6 lines: a hook in the first line, why it matters, a question at the end, "Sources are cited under each chart." and up to 3 hashtags.
+- The post text ("post") is assembled by code from parts; write each part well:
+  - "titulo": a strong headline, max 60 characters, no emoji, no hashtags (it is shown in bold).
+  - "gancho": 1 to 2 short sentences, max 160 characters, that make people click "see more": a surprising number, a bold claim or a pain they recognize. Do not repeat the title.
+  - "pontos": 3 or 4 takeaways, max 120 characters each, concrete and skimmable; start with a verb or a number.
+  - "conclusao": one sentence with the main lesson or your opinion.
+  - "pergunta": one specific question people can answer from their own experience (not "what do you think?").
+  - "hashtags": 3 relevant hashtags, without the # sign.
 - Practical, specific, no fluff. Tone: ${p.tom.join(" ")}`;
 }
 
@@ -238,7 +245,7 @@ const CHART_SCHEMA = {
 const CAROUSEL_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["titulo", "subtitulo", "grafico_capa", "imagem_prompt", "slides", "fechamento", "legenda"],
+  required: ["titulo", "subtitulo", "grafico_capa", "imagem_prompt", "slides", "fechamento", "post"],
   properties: {
     titulo: { type: "string", description: "Cover title" },
     subtitulo: { type: "string", description: "One line under the cover title" },
@@ -260,7 +267,19 @@ const CAROUSEL_SCHEMA = {
       required: ["titulo", "texto"],
       properties: { titulo: { type: "string" }, texto: { type: "string" } },
     },
-    legenda: { type: "string", description: "Post caption" },
+    post: {
+      type: "object",
+      additionalProperties: false,
+      required: ["titulo", "gancho", "pontos", "conclusao", "pergunta", "hashtags"],
+      properties: {
+        titulo: { type: "string", description: "Headline, max 60 characters" },
+        gancho: { type: "string", description: "Hook before 'see more', max 160 characters" },
+        pontos: { type: "array", items: { type: "string" }, description: "3 or 4 takeaways" },
+        conclusao: { type: "string" },
+        pergunta: { type: "string" },
+        hashtags: { type: "array", items: { type: "string" }, description: "3 hashtags without #" },
+      },
+    },
   },
 } as const;
 
@@ -443,6 +462,7 @@ export class ClaudeDrafter implements Drafter {
     const json = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
     const draft = JSON.parse(json) as Omit<CarouselContent, "slides" | "capa_grafico"> & {
       grafico_capa?: DraftChart;
+      post?: PostParts;
       slides: { titulo: string; texto: string; grafico?: DraftChart }[];
     };
     const custo = costOf({
@@ -455,8 +475,9 @@ export class ClaudeDrafter implements Drafter {
       draft.slides.map((s) => ({ titulo: s.titulo, texto: s.texto, grafico: buildChart(s.grafico, research.items) })),
       research.items,
     );
-    const { grafico_capa: _ignored, ...rest } = draft;
-    return normalizeCarousel({ ...rest, capa_grafico: cover, slides, custo });
+    const { grafico_capa: _ignored, post, ...rest } = draft;
+    const legenda = post ? buildCaption(post) : (rest.legenda ?? "");
+    return normalizeCarousel({ ...rest, legenda, capa_grafico: cover, slides, custo });
   }
 
 }
