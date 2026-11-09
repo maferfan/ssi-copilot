@@ -206,7 +206,7 @@ export function topicsMessage(items: TopicIdea[], usd: number): string {
     (t, i) => `<b>${i + 1}. ${esc(t.titulo)}</b> · ${AREA[t.area]}
 <i>${esc(t.gancho)}</i>
 ${esc(t.porque)}
-🔗 ${esc(t.fonte || host(t.url))} (${esc(host(t.url))})`,
+${t.conferido === false ? "⚠️ fonte não conferida" : "🔗"} ${esc(t.fonte || host(t.url))}${t.url ? ` (${esc(host(t.url))})` : ""}`,
   );
   return `🔥 <b>Temas em alta</b> (software, front-end e IA)
 
@@ -785,7 +785,10 @@ Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · $
       return;
     }
     if (found.items.length === 0) {
-      await messenger.send(chatId, "Não achei temas com fonte conferida desta vez. Tente /temas de novo daqui a pouco.");
+      await messenger.send(
+        chatId,
+        `Não achei temas desta vez (o Claude sugeriu ${found.sugeridos}, a busca trouxe ${found.links} links). Tente /temas de novo daqui a pouco.`,
+      );
       return;
     }
     await store.setSetting("topics", JSON.stringify(found.items));

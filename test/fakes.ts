@@ -170,7 +170,7 @@ export class FakeDrafter implements Drafter {
   ];
   async suggestTopics() {
     this.topicCalls++;
-    return { items: this.topicResults, custo: { inputTokens: 1000, outputTokens: 100, searches: 3, usd: 0.04 } };
+    return { items: this.topicResults, custo: { inputTokens: 1000, outputTokens: 100, searches: 3, usd: 0.04 }, sugeridos: this.topicResults.length, links: 5 };
   }
   calls: { text: string | null; avoid: string[] }[] = [];
   carouselCalls: { topic: string; previous?: CarouselContent; instructions?: string }[] = [];

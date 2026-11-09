@@ -165,6 +165,8 @@ export interface TopicIdea {
   porque: string;
   fonte: string;
   url: string;
+  /** O site do link apareceu nos resultados da busca. */
+  conferido?: boolean;
 }
 
 /** Gera a ilustração da capa. Devolve null se não der (o carrossel sai sem ela). */
@@ -179,7 +181,7 @@ export interface Drafter {
   /** Transforma a cena descrita pelo usuário (qualquer idioma) numa descrição em inglês para o Flux. */
   sceneToPrompt(scene: string): Promise<string>;
   /** Pesquisa na web os assuntos em alta (software, front-end, IA) e sugere temas de carrossel. */
-  suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost }>;
+  suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost; sugeridos: number; links: number }>;
 }
 
 export interface RenderedCarousel {

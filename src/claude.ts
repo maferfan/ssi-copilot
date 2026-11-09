@@ -102,17 +102,36 @@ export function verifyResearch(items: ResearchItem[], seen: Set<string>): Resear
   });
 }
 
-/** Primeiro array JSON do texto (a resposta com busca vem em texto livre). */
+/**
+ * Array JSON da resposta (a resposta com busca vem em texto livre): tenta primeiro um bloco
+ * ```json```, depois cada "[" do texto até achar um array que feche e seja JSON válido.
+ */
 export function parseJsonArray<T>(text: string): T[] {
-  const start = text.indexOf("[");
-  const end = text.lastIndexOf("]");
-  if (start < 0 || end <= start) return [];
-  try {
-    const data = JSON.parse(text.slice(start, end + 1));
-    return Array.isArray(data) ? (data as T[]) : [];
-  } catch {
-    return [];
+  const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map((m) => m[1]);
+  for (const candidate of [...fenced, text]) {
+    for (let start = candidate.indexOf("["); start >= 0; start = candidate.indexOf("[", start + 1)) {
+      let depth = 0;
+      let inString = false;
+      for (let i = start; i < candidate.length; i++) {
+        const ch = candidate[i];
+        if (inString) {
+          if (ch === "\\") i++;
+          else if (ch === '"') inString = false;
+        } else if (ch === '"') inString = true;
+        else if (ch === "[") depth++;
+        else if (ch === "]" && --depth === 0) {
+          try {
+            const data = JSON.parse(candidate.slice(start, i + 1));
+            if (Array.isArray(data) && data.length && typeof data[0] === "object") return data as T[];
+          } catch {
+            /* não era o array certo: tenta o próximo "[" */
+          }
+          break;
+        }
+      }
+    }
   }
+  return [];
 }
 
 export function researchPrompt(topic: string): string {
@@ -152,22 +171,24 @@ Only suggest topics backed by something you found in these searches. Reply at th
 }
 
 /**
- * Só temas cujo site apareceu nos resultados da busca, sem repetidos, no máximo 8.
- * Para tema basta o site (o Claude às vezes cita outra página do mesmo artigo);
- * os números dos gráficos continuam exigindo a página exata (verifyResearch).
+ * Temas sem repetidos, no máximo 8, os de site conferido primeiro.
+ * Conferido = o site do link apareceu nos resultados da busca (para tema basta o site; os
+ * números dos gráficos continuam exigindo a página exata em verifyResearch). Se houver menos
+ * de 4 conferidos, completa com os outros, marcados como não conferidos.
  */
 export function verifyTopics(items: TopicIdea[], seen: Set<string>): TopicIdea[] {
   const hosts = new Set([...seen].map((k) => k.split("/")[0]));
-  const out: TopicIdea[] = [];
+  const valid: TopicIdea[] = [];
   for (const it of items) {
-    const key = it?.url ? urlKey(it.url) : null;
-    const ok = key && (seen.has(key) || hosts.has(key.split("/")[0]));
-    if (!ok || !it.titulo?.trim() || out.some((o) => o.titulo === it.titulo)) continue;
+    if (!it?.titulo?.trim() || valid.some((o) => o.titulo === it.titulo.trim())) continue;
+    const key = it.url ? urlKey(it.url) : null;
+    const conferido = Boolean(key && (seen.has(key) || hosts.has(key.split("/")[0])));
     const area = it.area === "frontend" || it.area === "ai" ? it.area : "software";
-    out.push({ titulo: it.titulo.trim(), area, gancho: (it.gancho ?? "").trim(), porque: (it.porque ?? "").trim(), fonte: (it.fonte ?? "").trim(), url: it.url });
-    if (out.length >= 8) break;
+    valid.push({ titulo: it.titulo.trim(), area, gancho: (it.gancho ?? "").trim(), porque: (it.porque ?? "").trim(), fonte: (it.fonte ?? "").trim(), url: it.url ?? "", conferido });
   }
-  return out;
+  const ok = valid.filter((t) => t.conferido);
+  const rest = ok.length >= 4 ? [] : valid.filter((t) => !t.conferido);
+  return [...ok, ...rest].slice(0, 8);
 }
 
 export function carouselSystemPrompt(p: Perfil): string {
@@ -394,9 +415,12 @@ export class ClaudeDrafter implements Drafter {
     return { items: verifyResearch(parseJsonArray<ResearchItem>(r.text), r.seen), input: r.input, output: r.output, searches: r.searches };
   }
 
-  async suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost }> {
+  async suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost; sugeridos: number; links: number }> {
     const r = await this.searchAndAnswer(topicsPrompt(new Date()), 6, "A busca de temas");
-    return { items: verifyTopics(parseJsonArray<TopicIdea>(r.text), r.seen), custo: costOf(r) };
+    const parsed = parseJsonArray<TopicIdea>(r.text);
+    const items = verifyTopics(parsed, r.seen);
+    console.log("temas", { sugeridos: parsed.length, links: r.seen.size, buscas: r.searches, mantidos: items.length, inicio: r.text.slice(0, 120) });
+    return { items, custo: costOf(r), sugeridos: parsed.length, links: r.seen.size };
   }
 
 
