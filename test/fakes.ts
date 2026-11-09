@@ -84,6 +84,11 @@ export class MemoryStore implements Store {
     for (const j of picked) j.status = "running";
     return picked.map((j) => ({ id: j.id, job: j.job }));
   }
+  async jobCounts() {
+    const out: Record<string, number> = {};
+    for (const j of this.jobs) out[j.status] = (out[j.status] ?? 0) + 1;
+    return out;
+  }
   async finishJob(id: number, ok: boolean) {
     const j = this.jobs.find((x) => x.id === id);
     if (j) j.status = ok ? "done" : "failed";

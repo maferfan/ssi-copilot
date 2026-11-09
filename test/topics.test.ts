@@ -67,13 +67,19 @@ describe("/temas", () => {
 });
 
 describe("verifyTopics", () => {
-  it("só temas com link conferido, sem repetidos, no máximo 8", () => {
+  it("aceita tema cujo site apareceu na busca, mesmo em outra página; descarta site que não apareceu e repetidos", () => {
     const seen = new Set(["react.dev/blog/2026/10/compiler", "infoq.com/a"]);
     const out = verifyTopics(
-      [idea(), idea(), idea({ titulo: "Inventado", url: "https://inventado.example/x" }), idea({ titulo: "Evals", area: "ai", url: "https://www.infoq.com/a/" })],
+      [
+        idea(),
+        idea(),
+        idea({ titulo: "Inventado", url: "https://inventado.example/x" }),
+        idea({ titulo: "Evals", area: "ai", url: "https://www.infoq.com/a/" }),
+        idea({ titulo: "Monolith is back", area: "software", url: "https://www.infoq.com/news/2026/11/monolith/" }),
+      ],
       seen,
     );
-    expect(out.map((t) => t.titulo)).toEqual(["React Compiler is stable", "Evals"]);
+    expect(out.map((t) => t.titulo)).toEqual(["React Compiler is stable", "Evals", "Monolith is back"]);
   });
 
   it("o pedido cobre as três áreas e pede o motivo em português", () => {
@@ -81,6 +87,8 @@ describe("verifyTopics", () => {
     expect(p).toContain("Today is 2026-11-09");
     expect(p).toContain('"software" | "frontend" | "ai"');
     expect(p).toContain("in Brazilian Portuguese");
+    expect(p).toContain("at least one per area");
+    expect(p).toContain("no comments about your search");
   });
 });
 

@@ -23,6 +23,8 @@ export interface Env {
   TOKEN_ENCRYPTION_KEY?: string;
   /** Opcional: trava o bot num chat específico. */
   OWNER_CHAT_ID?: string;
+  /** Commit publicado (gravado pelo deploy). */
+  VERSION?: string;
 }
 
 function makeLinkedIn(env: Env, store: D1Store) {
@@ -49,6 +51,7 @@ function makeBot(env: Env, web = false) {
       ownerChatId: env.OWNER_CHAT_ID ? Number(env.OWNER_CHAT_ID) : undefined,
       defer: web ? (job) => store.enqueueJob(job, now().toISOString()) : undefined,
       illustrator: env.AI ? new FluxIllustrator(env.AI) : undefined,
+      version: env.VERSION,
     },
     perfil,
   );
@@ -80,10 +83,12 @@ async function guarded(env: Env, what: string, run: (bot: ReturnType<typeof make
 
 async function runQueue(env: Env) {
   const store = new D1Store(env.DB);
+  await store.setSetting("queue_heartbeat", new Date().toISOString());
   const jobs = await store.takeJobs(3);
   if (jobs.length === 0) return;
   const bot = makeBot(env);
   for (const { id, job } of jobs) {
+    console.log("trabalho", id, job.kind);
     try {
       await bot.runJob(job);
       await store.finishJob(id, true);
@@ -106,6 +111,8 @@ export default {
         return new Response("forbidden", { status: 403 });
       }
       const update = (await request.json()) as TgUpdate;
+      const text = update.message?.text ?? update.callback_query?.data ?? "";
+      console.log("telegram", update.message ? "mensagem" : "botão", text.slice(0, 40));
       // Responde já e processa em segundo plano: o Telegram não reenvia a mensagem
       ctx.waitUntil(
         makeBot(env, true)

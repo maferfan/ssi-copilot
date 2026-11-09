@@ -587,3 +587,36 @@ describe("link que cai na tela de login", () => {
     expect(ctx.store.posts[0].status).toBe("pending");
   });
 });
+
+describe("/status e comandos desconhecidos", () => {
+  it("comando desconhecido diz qual comando não reconheceu", async () => {
+    const { bot, messenger } = await setup();
+    await bot.handleUpdate(msg("/tems"));
+    expect(messenger.last().html).toContain("Não conheço o comando <code>/tems</code>");
+  });
+
+  it("/ajuda continua mostrando a ajuda", async () => {
+    const { bot, messenger } = await setup();
+    await bot.handleUpdate(msg("/ajuda"));
+    expect(messenger.last().html).toMatch(/^<b>Como funciona<\/b>/);
+  });
+
+  it("/status mostra versão, quando a fila rodou e os pedidos", async () => {
+    const ctx = makeDeps({ now: () => new Date("2026-11-06T14:00:00Z"), version: "abc1234" });
+    const bot = new Bot(ctx.deps, perfil);
+    await bot.handleUpdate(msg("/start"));
+    await bot.handleUpdate(msg("/status"));
+    expect(ctx.messenger.last().html).toContain("<code>abc1234</code>");
+    expect(ctx.messenger.last().html).toContain("a fila nunca rodou");
+
+    await ctx.store.setSetting("queue_heartbeat", "2026-11-06T13:59:00Z");
+    await ctx.store.enqueueJob({ kind: "topics", chatId: OWNER });
+    await bot.handleUpdate(msg("/status"));
+    expect(ctx.messenger.last().html).toContain("✅ rodou há 1 min");
+    expect(ctx.messenger.last().html).toContain("1 esperando");
+
+    await ctx.store.setSetting("queue_heartbeat", "2026-11-06T13:00:00Z");
+    await bot.handleUpdate(msg("/status"));
+    expect(ctx.messenger.last().html).toContain("não roda há 60 min");
+  });
+});

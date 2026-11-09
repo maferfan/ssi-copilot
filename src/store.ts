@@ -135,6 +135,11 @@ export class D1Store implements Store {
     return results.sort((a, b) => a.id - b.id).map((r) => ({ id: r.id, job: JSON.parse(r.payload) as Job }));
   }
 
+  async jobCounts() {
+    const { results } = await this.db.prepare("SELECT status, COUNT(*) AS n FROM jobs GROUP BY status").all<{ status: string; n: number }>();
+    return Object.fromEntries(results.map((r) => [r.status, r.n]));
+  }
+
   async finishJob(id: number, ok: boolean) {
     await this.db.prepare("UPDATE jobs SET status = ? WHERE id = ?").bind(ok ? "done" : "failed", id).run();
   }
