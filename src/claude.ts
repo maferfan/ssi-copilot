@@ -138,25 +138,31 @@ export function topicsPrompt(today: Date): string {
 
 Search recent news, release notes, surveys, engineering blogs and widely shared discussions (e.g. Hacker News, dev.to, The Pragmatic Engineer, InfoQ, official framework/tool blogs, LinkedIn News pages that are public).
 
-Suggest 8 carousel topics for a web developer's LinkedIn, mixing the three areas. Prefer topics that spark discussion: a recent release or change people must react to, a surprising number, a common mistake, a debate with two sides. Avoid generic evergreen advice.
+Run several different searches (at least one per area) so you have enough recent material. Suggest 8 carousel topics for a web developer's LinkedIn, mixing the three areas (2 to 3 per area). Prefer topics that spark discussion: a recent release or change people must react to, a surprising number, a common mistake, a debate with two sides. Avoid generic evergreen advice.
 
 For each topic give:
 - "titulo": a carousel topic in English, specific (max 10 words)
 - "area": "software" | "frontend" | "ai"
 - "gancho": the hook in English: the claim or question that opens the post (max 20 words)
-- "porque": in Brazilian Portuguese, one sentence on why it is engaging now
+- "porque": in Brazilian Portuguese, one sentence on why it is engaging now (about the topic itself; no comments about your search or verification)
 - "fonte": the publication or site that shows it is current
-- "url": the page you found it on
+- "url": copied exactly from a search result you got in this conversation
 
-Reply at the end with ONLY a JSON array, no text before or after.`;
+Only suggest topics backed by something you found in these searches. Reply at the end with ONLY a JSON array, no text before or after.`;
 }
 
-/** Só temas com link conferido na busca, sem repetidos, no máximo 8. */
+/**
+ * Só temas cujo site apareceu nos resultados da busca, sem repetidos, no máximo 8.
+ * Para tema basta o site (o Claude às vezes cita outra página do mesmo artigo);
+ * os números dos gráficos continuam exigindo a página exata (verifyResearch).
+ */
 export function verifyTopics(items: TopicIdea[], seen: Set<string>): TopicIdea[] {
+  const hosts = new Set([...seen].map((k) => k.split("/")[0]));
   const out: TopicIdea[] = [];
   for (const it of items) {
     const key = it?.url ? urlKey(it.url) : null;
-    if (!key || !seen.has(key) || !it.titulo?.trim() || out.some((o) => o.titulo === it.titulo)) continue;
+    const ok = key && (seen.has(key) || hosts.has(key.split("/")[0]));
+    if (!ok || !it.titulo?.trim() || out.some((o) => o.titulo === it.titulo)) continue;
     const area = it.area === "frontend" || it.area === "ai" ? it.area : "software";
     out.push({ titulo: it.titulo.trim(), area, gancho: (it.gancho ?? "").trim(), porque: (it.porque ?? "").trim(), fonte: (it.fonte ?? "").trim(), url: it.url });
     if (out.length >= 8) break;
