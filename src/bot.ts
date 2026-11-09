@@ -233,6 +233,7 @@ export function carouselButtons(id: number): InlineButton[][] {
       { text: "✏️ Ajustar", data: `cj:${id}` },
       { text: "❌ Descartar", data: `cx:${id}` },
     ],
+    [{ text: "🖼️ Outra imagem", data: `ci:${id}` }],
   ];
 }
 
@@ -383,6 +384,9 @@ export class Bot {
         }
         case "carousel_topic":
           await this.requestCarousel(chatId, text);
+          return;
+        case "carousel_image":
+          await this.schedule({ kind: "image", chatId, carouselId: awaiting.carouselId, scene: text }, "🖼️ Gerando a imagem com essa cena… a prévia chega em até 1 minuto.");
           return;
         case "carousel_adjust": {
           const prev = await store.getCarousel(awaiting.carouselId);
@@ -606,6 +610,8 @@ export class Bot {
       }
       case "topics":
         return this.sendTopics(job.chatId);
+      case "image":
+        return this.regenerateImage(job.chatId, job.carouselId, job.scene);
     }
   }
 
@@ -623,14 +629,49 @@ export class Bot {
       const keep = instructions ? previous?.content.capa_imagem : undefined;
       const art = keep ?? (content.imagem_prompt && this.deps.illustrator ? await this.deps.illustrator.generate(content.imagem_prompt) : null);
       if (art) content.capa_imagem = art;
-      const rendered = await renderer.render(content);
-      const id = await store.addCarousel({ topic, content, createdAt: this.iso() });
-      if (previous && previous.status === "draft") await store.updateCarousel(previous.id, { status: "discarded" });
-      const carousel = (await store.getCarousel(id))!;
-      await messenger.sendPhotos(chatId, rendered.images);
-      await messenger.send(chatId, carouselCard(carousel, await this.nextSlotLabel()), carouselButtons(id));
+      await this.sendNewVersion(chatId, topic, content, previous);
     } catch (err) {
       await messenger.send(chatId, `⚠️ Não consegui montar o carrossel: ${esc(String((err as Error).message))}`);
+    }
+  }
+
+  /** Salva a nova versão, descarta o rascunho anterior e manda a prévia com o cartão. */
+  private async sendNewVersion(chatId: number, topic: string, content: CarouselContent, previous?: Carousel) {
+    const { messenger, renderer, store } = this.deps;
+    const rendered = await renderer.render(content);
+    const id = await store.addCarousel({ topic, content, createdAt: this.iso() });
+    if (previous && previous.status === "draft") await store.updateCarousel(previous.id, { status: "discarded" });
+    const carousel = (await store.getCarousel(id))!;
+    await messenger.sendPhotos(chatId, rendered.images);
+    await messenger.send(chatId, carouselCard(carousel, await this.nextSlotLabel()), carouselButtons(id));
+  }
+
+  /** Só troca a ilustração da capa: o texto e os gráficos ficam iguais. */
+  private async regenerateImage(chatId: number, carouselId: number, scene?: string) {
+    const { messenger, store, drafter, illustrator } = this.deps;
+    const prev = await store.getCarousel(carouselId);
+    if (!prev || prev.status !== "draft") {
+      await messenger.send(chatId, "Esse carrossel já foi decidido; a imagem não pode mais mudar.");
+      return;
+    }
+    if (!illustrator) {
+      await messenger.send(chatId, "A geração de imagens não está ativa neste bot.");
+      return;
+    }
+    try {
+      const prompt = scene ? await drafter.sceneToPrompt(scene) : prev.content.imagem_prompt;
+      if (!prompt) {
+        await messenger.send(chatId, "Esse carrossel não tem uma cena descrita. Toque em 🖼️ Outra imagem e escreva a cena.");
+        return;
+      }
+      const art = await illustrator.generate(prompt);
+      if (!art) {
+        await messenger.send(chatId, "⚠️ Não consegui gerar a imagem agora (a cota grátis do dia pode ter acabado). Tente de novo mais tarde.");
+        return;
+      }
+      await this.sendNewVersion(chatId, prev.topic, { ...prev.content, imagem_prompt: prompt, capa_imagem: art }, prev);
+    } catch (err) {
+      await messenger.send(chatId, `⚠️ Não consegui trocar a imagem: ${esc(String((err as Error).message))}`);
     }
   }
 
@@ -661,6 +702,20 @@ export class Bot {
         await messenger.answerCallback(callbackId, "Refazendo…");
         await messenger.edit(chatId, messageId, `${carouselCard(c, when)}\n\n🔄 <i>Refeito abaixo.</i>`);
         await this.requestCarousel(chatId, c.topic, c.id);
+        return;
+      case "ci":
+        await messenger.answerCallback(callbackId);
+        await this.setAwaiting({ type: "carousel_image", carouselId: id });
+        await messenger.send(
+          chatId,
+          "🖼️ Descreva a cena que você quer na capa (pode ser em português), por exemplo: <i>uma pessoa olhando o relógio enquanto a página carrega</i>.\nOu gere outra com a mesma ideia:",
+          [[{ text: "🎲 Outra com a mesma ideia", data: `cn:${id}` }]],
+        );
+        return;
+      case "cn":
+        await messenger.answerCallback(callbackId, "Gerando…");
+        await this.setAwaiting(null);
+        await this.schedule({ kind: "image", chatId, carouselId: id }, "🖼️ Gerando outra imagem… a prévia chega em até 1 minuto.");
         return;
       case "cj":
         await messenger.answerCallback(callbackId);

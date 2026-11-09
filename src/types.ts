@@ -91,7 +91,9 @@ export interface WeeklyMetrics {
 export type Job =
   | { kind: "daily" }
   | { kind: "carousel"; chatId: number; topic: string; previousId?: number; instructions?: string }
-  | { kind: "topics"; chatId: number };
+  | { kind: "topics"; chatId: number }
+  /** Nova ilustração da capa; sem `scene`, usa a mesma ideia da anterior. */
+  | { kind: "image"; chatId: number; carouselId: number; scene?: string };
 
 export type ActionType = "comment" | "post" | "invite" | "ssi";
 
@@ -102,7 +104,8 @@ export type Awaiting =
   | { type: "carousel_topic" }
   | { type: "carousel_adjust"; carouselId: number }
   | { type: "metrics"; week: string }
-  | { type: "invites" };
+  | { type: "invites" }
+  | { type: "carousel_image"; carouselId: number };
 
 export interface Store {
   getSetting(key: string): Promise<string | null>;
@@ -173,6 +176,8 @@ export interface Drafter {
   draftComment(post: Pick<Post, "url" | "author" | "text">, avoid: string[]): Promise<string>;
   /** Escreve um carrossel; com `previous` + `instructions`, ajusta uma versão anterior. */
   draftCarousel(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent>;
+  /** Transforma a cena descrita pelo usuário (qualquer idioma) numa descrição em inglês para o Flux. */
+  sceneToPrompt(scene: string): Promise<string>;
   /** Pesquisa na web os assuntos em alta (software, front-end, IA) e sugere temas de carrossel. */
   suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost }>;
 }

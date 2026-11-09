@@ -339,6 +339,23 @@ export class ClaudeDrafter implements Drafter {
   }
 
   /** Passo 1: busca na web e devolve só os dados cujo link apareceu nos resultados. */
+  async sceneToPrompt(scene: string): Promise<string> {
+    const response = await this.client.beta.messages.create({
+      model: MODEL,
+      max_tokens: 2000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      output_config: { effort: "low" },
+      system:
+        "You turn a scene idea (any language) into one or two English sentences describing only what is visible in an illustration: people, objects, setting, mood. Never ask for text, words, letters, charts or logos in the image. Reply with the description only.",
+      messages: [{ role: "user", content: `<scene>\n${scene}\n</scene>` }],
+    });
+    if (response.stop_reason === "refusal") throw new Error("O Claude não quis descrever essa cena.");
+    const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("").trim();
+    if (!text) throw new Error("Resposta vazia do Claude.");
+    return text;
+  }
+
   /** Conversa com busca na web até a resposta final (a busca pode pausar no meio: pause_turn). */
   private async searchAndAnswer(prompt: string, maxUses: number, what: string) {
     const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: prompt }];

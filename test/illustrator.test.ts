@@ -85,3 +85,51 @@ describe("capa com ilustração", () => {
     expect(normalizeCarousel({ ...sampleCarousel(), capa_imagem: "https://evil.example/x.jpg" }).capa_imagem).toBeUndefined();
   });
 });
+
+describe("🖼️ Outra imagem", () => {
+  it("o cartão do carrossel tem o botão", async () => {
+    const { bot, messenger } = await setup();
+    await bot.handleUpdate(msg("/carrossel ttfb"));
+    expect(messenger.lastCard()!.buttons?.at(-1)?.[0]).toEqual({ text: "🖼️ Outra imagem", data: "ci:1" });
+  });
+
+  it("mesma ideia: gera outra imagem com a mesma cena e mantém o texto", async () => {
+    const { bot, store, prompts, drafter } = await setup();
+    await bot.handleUpdate(msg("/carrossel ttfb"));
+    await bot.handleUpdate(click("ci:1"));
+    await bot.handleUpdate(click("cn:1"));
+    expect(prompts).toEqual(["a developer watching a slow loading bar", "a developer watching a slow loading bar"]);
+    expect(drafter.carouselCalls).toHaveLength(1); // texto não foi reescrito
+    expect(store.carousels.map((c) => c.status)).toEqual(["discarded", "draft"]);
+    expect(store.carousels[1].content.titulo).toBe(store.carousels[0].content.titulo);
+  });
+
+  it("cena escrita pelo usuário: o Claude passa para inglês e o Flux usa essa cena", async () => {
+    const { bot, store, prompts, drafter } = await setup();
+    await bot.handleUpdate(msg("/carrossel ttfb"));
+    await bot.handleUpdate(click("ci:1"));
+    await bot.handleUpdate(msg("uma pessoa olhando o relógio"));
+    expect(drafter.sceneCalls).toEqual(["uma pessoa olhando o relógio"]);
+    expect(prompts.at(-1)).toBe("EN: uma pessoa olhando o relógio");
+    expect(store.carousels[1].content.imagem_prompt).toBe("EN: uma pessoa olhando o relógio");
+  });
+
+  it("carrossel já aprovado não troca a imagem", async () => {
+    const { bot, messenger, prompts } = await setup();
+    await bot.handleUpdate(msg("/carrossel ttfb"));
+    await bot.handleUpdate(click("ca:1"));
+    await bot.handleUpdate(click("ci:1"));
+    expect(messenger.answers.at(-1)?.text).toContain("já foi decidido");
+    expect(prompts).toHaveLength(1);
+  });
+
+  it("se o Flux falhar, avisa e o rascunho continua como estava", async () => {
+    const ctx = await setup();
+    await ctx.bot.handleUpdate(msg("/carrossel ttfb"));
+    ctx.deps.illustrator = { generate: async () => null };
+    await ctx.bot.handleUpdate(click("ci:1"));
+    await ctx.bot.handleUpdate(click("cn:1"));
+    expect(ctx.messenger.last().html).toContain("Não consegui gerar a imagem");
+    expect(ctx.store.carousels.map((c) => c.status)).toEqual(["draft"]);
+  });
+});
