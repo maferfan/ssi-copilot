@@ -4,7 +4,8 @@ import { urlKey } from "./claude";
 import { extractLinkedInUrl, extractPostUrn, isBoilerplate, isLoginWall, textAroundUrl } from "./linkedin";
 import type { Perfil } from "./perfil";
 import type { TgUpdate } from "./telegram";
-import { NotAPostError, type Awaiting, type Carousel, type CarouselContent, type Deps, type InlineButton, type Job, type JobPosting, type LinkedInConnection, type Post, type TopicIdea, type WeeklyMetrics } from "./types";
+import { NotAPostError, type Awaiting, type Carousel, type CarouselContent, type Deps, type InlineButton, type Job, type JobPosting, type LinkedInConnection, type Post, type TopicIdea, type Video, type WeeklyMetrics } from "./types";
+import { TARGET_WORDS } from "./video";
 import { shiftWeek, weekKey, weekLabel, weekStartInstant } from "./week";
 
 /** Quantos posts no máximo viram sugestão a cada rodada das 18h. */
@@ -75,6 +76,63 @@ export function nextPublishLabel(now: Date, taken: (string | null)[] = []): stri
   return fridayLabel(nextFreeFriday(now, taken), now);
 }
 
+/** Telegram aceita até 4096 caracteres por mensagem. */
+const TG_LIMIT = 4000;
+
+function clip(html: string): string {
+  return html.length > TG_LIMIT ? `${html.slice(0, TG_LIMIT - 1)}…` : html;
+}
+
+/** Mensagem 1: o texto para ler na gravação, limpo, na ordem. */
+export function videoReadCard(v: Video): string {
+  const s = v.script;
+  const lines = [
+    `🎬 <b>${esc(s.titulo)}</b>`,
+    "",
+    `🪑 <b>Abertura (você na câmera):</b>\n${esc(s.abertura)}`,
+    "",
+    ...s.trechos.map((t, i) => `${i + 1}. ${esc(t.fala)}`),
+    "",
+    `🏁 ${esc(s.fechamento)}`,
+  ];
+  return clip(lines.join("\n"));
+}
+
+/** Mensagem 2: duração, cenas, fontes, legenda e como gravar. */
+export function videoScenesCard(v: Video): string {
+  const s = v.script;
+  const fora = s.palavras < TARGET_WORDS.min ? " (curto)" : s.palavras > TARGET_WORDS.max ? " (longo: vai passar de 1 min)" : "";
+  const cenas = s.trechos.map((t, i) => `${i + 1}. ${t.destaque ? `<b>${esc(t.destaque)}</b> · ` : ""}<i>${esc(t.imagem)}</i>${t.fato_id ? ` [${esc(t.fato_id)}]` : ""}`);
+  const fontes = s.fatos.length
+    ? s.fatos.map((f) => `[${esc(f.id)}] ${esc(f.fato)} — <a href="${esc(f.url)}">${esc(f.fonte || "fonte")}</a>`)
+    : ["<i>Nenhum estudo citado: o roteiro fala da ideia em termos gerais.</i>"];
+  const custo = s.custo ? ` · US$ ${s.custo.usd.toFixed(2)}` : "";
+  const lines = [
+    `⏱️ ${s.palavras} palavras ≈ ${s.segundos} s${fora}${custo}`,
+    "",
+    "🖼️ <b>Cenas</b> (imagem que aparece em cima enquanto você fala):",
+    ...cenas,
+    "",
+    "📚 <b>Fontes</b>",
+    ...fontes,
+    "",
+    `📝 <b>Legenda</b>\n${esc(s.legenda)}`,
+    "",
+    "🎙️ <b>Como gravar:</b> um vídeo só, celular em pé, você sentado olhando para a câmera. Leia do começo ao fim com calma, pausando 1 segundo entre os trechos. Errou? Pause e repita a frase; dá para cortar depois.",
+  ];
+  return clip(lines.join("\n"));
+}
+
+export function videoButtons(id: number): InlineButton[][] {
+  return [
+    [
+      { text: "🔄 Refazer", data: `vr:${id}` },
+      { text: "✏️ Ajustar", data: `vj:${id}` },
+    ],
+    [{ text: "❌ Descartar", data: `vx:${id}` }],
+  ];
+}
+
 const HELP = `<b>Como funciona</b>
 
 <b>Comentários</b>
@@ -93,6 +151,7 @@ Meta: ${WEEKLY_INVITE_GOAL} convites por semana. Mandou alguns? Registre com <co
 <b>Resumo e painel</b>
 Domingo às 18h chega o resumo da semana e eu peço 3 números das Análises do LinkedIn (/metricas). Eles vão para o painel (/painel).
 
+/video — roteiro de 1 minuto para Reels/TikTok (psicologia nos games)
 /vagas — 5 vagas no Brasil e 5 no exterior (sai sozinho no sábado)
 /temas — temas em alta para o próximo carrossel
 /agenda — carrosséis agendados, por sexta
@@ -370,6 +429,14 @@ export class Bot {
             await messenger.send(chatId, "Qual o tema do carrossel? Mande na próxima mensagem. 🎠");
           }
           return;
+        case "video":
+        case "vídeo":
+          if (arg) await this.requestVideo(chatId, arg);
+          else {
+            await this.setAwaiting({ type: "video_topic" });
+            await messenger.send(chatId, "Qual o tema do vídeo? Ex.: <i>por que é difícil largar uma missão pela metade</i>. 🎬");
+          }
+          return;
         case "ajuda":
         case "help":
           await messenger.send(chatId, HELP);
@@ -420,6 +487,14 @@ export class Bot {
         case "carousel_adjust": {
           const prev = await store.getCarousel(awaiting.carouselId);
           if (prev) await this.requestCarousel(chatId, prev.topic, prev.id, text);
+          return;
+        }
+        case "video_topic":
+          await this.requestVideo(chatId, text);
+          return;
+        case "video_adjust": {
+          const prev = await store.getVideo(awaiting.videoId);
+          if (prev) await this.requestVideo(chatId, prev.topic, prev.id, text);
           return;
         }
         case "invites": {
@@ -643,6 +718,62 @@ export class Bot {
         return this.sendJobs(job.chatId);
       case "image":
         return this.regenerateImage(job.chatId, job.carouselId, job.scene);
+      case "video": {
+        const prev = job.previousId ? await this.deps.store.getVideo(job.previousId) : null;
+        return this.createVideo(job.chatId, job.topic, prev ?? undefined, job.instructions);
+      }
+    }
+  }
+
+  // ---------- vídeo (Reels/TikTok) ----------
+
+  private requestVideo(chatId: number, topic: string, previousId?: number, instructions?: string) {
+    return this.schedule({ kind: "video", chatId, topic, previousId, instructions }, `🎬 Escrevendo o roteiro sobre <b>${esc(topic)}</b>… chega em 1–2 minutos.`);
+  }
+
+  private async createVideo(chatId: number, topic: string, previous?: Video, instructions?: string) {
+    const { messenger, drafter, store } = this.deps;
+    try {
+      const script = await drafter.draftVideo(topic, previous?.script, instructions);
+      const id = await store.addVideo({ topic, script, createdAt: this.iso() });
+      if (previous && previous.status === "draft") await store.updateVideoStatus(previous.id, "discarded");
+      const video = (await store.getVideo(id))!;
+      await messenger.send(chatId, videoReadCard(video));
+      await messenger.send(chatId, videoScenesCard(video), videoButtons(id));
+    } catch (err) {
+      await messenger.send(chatId, `⚠️ Não consegui escrever o roteiro: ${esc(String((err as Error).message))}`);
+    }
+  }
+
+  private async onVideoButton(action: string, id: number, chatId: number, messageId: number, callbackId: string) {
+    const { messenger, store } = this.deps;
+    const v = await store.getVideo(id);
+    if (!v) {
+      await messenger.answerCallback(callbackId, "Roteiro não encontrado.");
+      return;
+    }
+    if (v.status !== "draft") {
+      await messenger.answerCallback(callbackId, "Esse roteiro já foi decidido.");
+      return;
+    }
+    switch (action) {
+      case "vr":
+        await messenger.answerCallback(callbackId, "Refazendo…");
+        await messenger.edit(chatId, messageId, `${videoScenesCard(v)}\n\n🔄 <i>Refeito abaixo.</i>`);
+        await this.requestVideo(chatId, v.topic, v.id);
+        return;
+      case "vj":
+        await messenger.answerCallback(callbackId);
+        await this.setAwaiting({ type: "video_adjust", videoId: id });
+        await messenger.send(chatId, "O que mudar? Ex.: <i>troque o gancho por uma pergunta e use Dark Souls como exemplo</i>. ✏️");
+        return;
+      case "vx":
+        await messenger.answerCallback(callbackId, "Descartado");
+        await store.updateVideoStatus(id, "discarded");
+        await messenger.edit(chatId, messageId, `${videoScenesCard(v)}\n\n❌ <i>Descartado</i>`);
+        return;
+      default:
+        await messenger.answerCallback(callbackId);
     }
   }
 
@@ -974,6 +1105,7 @@ Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · $
     }
     if (action === "tp") return this.onTopicChosen(id, chatId, cb.id);
     if (action.startsWith("c")) return this.onCarouselButton(action, id, chatId, messageId, cb.id);
+    if (action.startsWith("v")) return this.onVideoButton(action, id, chatId, messageId, cb.id);
 
     const post = await store.getPost(id);
     if (!post) {

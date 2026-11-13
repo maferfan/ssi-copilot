@@ -17,6 +17,8 @@ import type {
   RenderedCarousel,
   TopicIdea,
   Renderer,
+  Video,
+  VideoScript,
   Store,
   WeeklyMetrics,
 } from "../src/types";
@@ -94,6 +96,20 @@ export class MemoryStore implements Store {
     const j = this.jobs.find((x) => x.id === id);
     if (j) j.status = ok ? "done" : "failed";
   }
+  videos: Video[] = [];
+  async addVideo(v: { topic: string; script: VideoScript; createdAt: string }) {
+    const id = this.videos.length + 1;
+    this.videos.push({ id, topic: v.topic, script: v.script, status: "draft", created_at: v.createdAt });
+    return id;
+  }
+  async getVideo(id: number) {
+    const v = this.videos.find((x) => x.id === id);
+    return v ? { ...v } : null;
+  }
+  async updateVideoStatus(id: number, status: Video["status"]) {
+    const v = this.videos.find((x) => x.id === id);
+    if (v) v.status = status;
+  }
   async logAction(type: ActionType, refId: number | null, createdAt: string, value: number | null = null) {
     this.actions.push({ type, refId, createdAt, value });
   }
@@ -158,6 +174,23 @@ export function sampleCarousel(titulo = "Como escolher a stack"): CarouselConten
   };
 }
 
+export function sampleScript(titulo = "Por que você não larga o jogo?"): VideoScript {
+  return {
+    titulo,
+    abertura: "Você já parou de jogar no meio de uma missão?",
+    trechos: [
+      { fala: "Isso tem nome: efeito Zeigarnik.", imagem: "a player staring at an unfinished quest", destaque: "Zeigarnik", fato_id: "F1" },
+      { fala: "Em 1927, uma psicóloga notou garçons lembrando pedidos abertos.", imagem: "a waiter in a 1920s cafe", destaque: "1927", fato_id: "F1" },
+      { fala: "Os jogos usam isso o tempo todo.", imagem: "a quest log full of open tasks", destaque: "", fato_id: "" },
+    ],
+    fechamento: "Termine o que importa, não o que te prende.",
+    legenda: "Legenda do vídeo #psicologia",
+    fatos: [{ id: "F1", fato: "Zeigarnik, 1927.", fonte: "Simply Psychology", ano: "1927", url: "https://www.simplypsychology.org/zeigarnik-effect.html" }],
+    palavras: 45,
+    segundos: 17,
+  };
+}
+
 export const job = (over: Partial<JobPosting> = {}): JobPosting => ({
   titulo: "Senior Frontend Engineer",
   empresa: "Acme",
@@ -193,6 +226,11 @@ export class FakeDrafter implements Drafter {
   async suggestTopics() {
     this.topicCalls++;
     return { items: this.topicResults, custo: { inputTokens: 1000, outputTokens: 100, searches: 3, usd: 0.04 }, sugeridos: this.topicResults.length, links: 5 };
+  }
+  videoCalls: { topic: string; previous?: VideoScript; instructions?: string }[] = [];
+  async draftVideo(topic: string, previous?: VideoScript, instructions?: string) {
+    this.videoCalls.push({ topic, previous, instructions });
+    return sampleScript(`Versão ${this.videoCalls.length}`);
   }
   calls: { text: string | null; avoid: string[] }[] = [];
   carouselCalls: { topic: string; previous?: CarouselContent; instructions?: string }[] = [];

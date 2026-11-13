@@ -4,7 +4,8 @@ import { buildCaption, type PostParts } from "./caption";
 import { normalizeCarousel } from "./carousel";
 import { jobsPrompt } from "./jobs";
 import { detectLanguage } from "./language";
-import { NotAPostError, type CarouselChart, type CarouselContent, type CarouselCost, type Drafter, type JobPosting, type Post, type TopicIdea } from "./types";
+import { NotAPostError, type CarouselChart, type CarouselContent, type CarouselCost, type Drafter, type JobPosting, type Post, type TopicIdea, type VideoBeat, type VideoFact, type VideoScript } from "./types";
+import { factsPrompt, finalizeScript, verifyFacts, VIDEO_SCHEMA, videoSystemPrompt, videoUserPrompt } from "./video";
 
 export const MODEL = "claude-sonnet-5-5";
 
@@ -488,4 +489,39 @@ export class ClaudeDrafter implements Drafter {
     return normalizeCarousel({ ...rest, legenda, capa_grafico: cover, slides, custo });
   }
 
+
+  /** Roteiro de vídeo: pesquisa fatos com fonte (ou reaproveita no ajuste) e escreve o roteiro. */
+  async draftVideo(topic: string, previous?: VideoScript, instructions?: string): Promise<VideoScript> {
+    let facts: VideoFact[];
+    let usage = { input: 0, output: 0, searches: 0 };
+    if (previous && instructions) {
+      facts = previous.fatos;
+    } else {
+      const r = await this.searchAndAnswer(factsPrompt(topic), 5, "A pesquisa para o vídeo");
+      facts = verifyFacts(parseJsonArray<VideoFact>(r.text), r.seen, urlKey);
+      usage = { input: r.input, output: r.output, searches: r.searches };
+      console.log("video fatos", { conferidos: facts.length, links: r.seen.size, buscas: r.searches });
+    }
+
+    const response = await this.client.beta.messages.create({
+      model: MODEL,
+      max_tokens: 16000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      output_config: { effort: "high", format: { type: "json_schema", schema: VIDEO_SCHEMA } },
+      system: videoSystemPrompt(this.perfil),
+      messages: [{ role: "user", content: videoUserPrompt(topic, facts, previous, instructions) }],
+    });
+    if (response.stop_reason === "refusal") throw new Error("O Claude não quis escrever sobre esse tema.");
+    if (response.stop_reason === "max_tokens") throw new Error("O roteiro ficou longo demais. Tente um tema mais específico.");
+    const json = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+    const draft = JSON.parse(json) as Pick<VideoScript, "titulo" | "abertura" | "fechamento" | "legenda"> & { trechos: VideoBeat[] };
+    const script = finalizeScript(draft, facts);
+    script.custo = costOf({
+      input: usage.input + response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0),
+      output: usage.output + response.usage.output_tokens,
+      searches: usage.searches,
+    });
+    return script;
+  }
 }
