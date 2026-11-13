@@ -59,6 +59,7 @@ Nada é publicado ou enviado no LinkedIn sem eu ver antes. Isso respeita os term
 | `/agora` | Gera as sugestões na hora, sem esperar as 18h |
 | `/agenda` | Carrosséis aprovados, com a sexta de cada um |
 | `/status` | Versão publicada, quando a fila rodou pela última vez e quantos pedidos estão esperando ou com erro |
+| `/vagas` | 5 vagas no Brasil (a partir de R$ 10 mil) e 5 no exterior (remoto aceitando Brasil), com base no currículo; sai sozinho no sábado às 10h |
 | `/temas` | 8 temas em alta (software, front-end e IA), cada um com gancho, motivo e fonte; um toque monta o carrossel |
 | `/fila` | Mostra os posts salvos e em que etapa cada um está |
 | `/semana` | Resumo da semana (segunda a domingo), comparado com a anterior |
@@ -129,7 +130,7 @@ flowchart LR
 | **TypeScript** | Linguagem | Tipos pegam erros antes do deploy (ex.: um status de post que não existe) | JavaScript puro |
 | **Wrangler** | CLI da Cloudflare | Publica o Worker, aplica migrações e grava segredos; o `wrangler.toml` descreve tudo em texto | Configurar à mão no painel |
 | **GitHub Actions** | CI e deploy | Testa cada pull request e publica cada push na `main`, sem instalar nada no computador | Deploy manual |
-| **Vitest** | Testes | Rápido, roda TypeScript direto; 162 testes em cerca de 1 segundo | Jest |
+| **Vitest** | Testes | Rápido, roda TypeScript direto; 171 testes em cerca de 1 segundo | Jest |
 
 ### Técnicas de engenharia
 
@@ -163,6 +164,8 @@ falta o texto → aguardando 18h → sugestão enviada → aprovado → comentad
 **Texto do post estruturado ([`src/caption.ts`](src/caption.ts)).** O Claude devolve as partes (título, gancho, 3 a 4 pontos, conclusão, pergunta e hashtags) e o código monta sempre no mesmo formato: título em negrito com letras Unicode (o LinkedIn não tem formatação), gancho curto para aparecer antes do "…ver mais", pontos com "→", pergunta com 👉, aviso das fontes e 3 hashtags, dentro do limite de 3.000 caracteres.
 
 **Trocar só a imagem.** O botão 🖼️ Outra imagem gera outra ilustração com a mesma cena ou com uma cena escrita pelo usuário (o Claude passa para inglês), sem reescrever o texto.
+
+**Vagas da semana (`/vagas`, [`src/jobs.ts`](src/jobs.ts)).** No sábado às 10h, o Claude busca na web vagas abertas nos últimos 30 dias que combinam com o currículo (em [`src/perfil.ts`](src/perfil.ts)): no Brasil, a partir de R$ 10 mil por mês; no exterior, remotas e aceitando quem mora no Brasil. O código fica só com links de sites que apareceram na busca, tira grupos de WhatsApp/Telegram/Facebook/Discord e redes sociais, não repete vagas já enviadas e põe primeiro as que informam salário dentro do mínimo (as outras vêm com ⚠️).
 
 **Temas em alta (`/temas`).** O Claude busca na web o que desenvolvedores estão discutindo nas últimas semanas (lançamentos, pesquisas, debates) em software, front-end e IA, e sugere 8 temas com gancho e motivo. Temas cujo site apareceu nos resultados da busca vêm primeiro; se forem menos de 4, os outros aparecem marcados "⚠️ fonte não conferida". Não são as métricas internas do LinkedIn, que não têm API pública.
 

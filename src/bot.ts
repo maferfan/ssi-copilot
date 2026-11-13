@@ -1,8 +1,10 @@
 import { detectLanguage } from "./language";
+import { BR_MIN_SALARY, JOBS_PER_REGION, selectJobs, SENT_MEMORY } from "./jobs";
+import { urlKey } from "./claude";
 import { extractLinkedInUrl, extractPostUrn, isBoilerplate, isLoginWall, textAroundUrl } from "./linkedin";
 import type { Perfil } from "./perfil";
 import type { TgUpdate } from "./telegram";
-import { NotAPostError, type Awaiting, type Carousel, type CarouselContent, type Deps, type InlineButton, type Job, type LinkedInConnection, type Post, type TopicIdea, type WeeklyMetrics } from "./types";
+import { NotAPostError, type Awaiting, type Carousel, type CarouselContent, type Deps, type InlineButton, type Job, type JobPosting, type LinkedInConnection, type Post, type TopicIdea, type WeeklyMetrics } from "./types";
 import { shiftWeek, weekKey, weekLabel, weekStartInstant } from "./week";
 
 /** Quantos posts no máximo viram sugestão a cada rodada das 18h. */
@@ -91,6 +93,7 @@ Meta: ${WEEKLY_INVITE_GOAL} convites por semana. Mandou alguns? Registre com <co
 <b>Resumo e painel</b>
 Domingo às 18h chega o resumo da semana e eu peço 3 números das Análises do LinkedIn (/metricas). Eles vão para o painel (/painel).
 
+/vagas — 5 vagas no Brasil e 5 no exterior (sai sozinho no sábado)
 /temas — temas em alta para o próximo carrossel
 /agenda — carrosséis agendados, por sexta
 /status — versão do bot e situação da fila
@@ -216,6 +219,29 @@ Toque no número para montar o carrossel daquele tema.
 <i>Busca na web, não as métricas internas do LinkedIn · ≈ US$ ${usd.toFixed(2)}</i>`;
 }
 
+export function jobsMessage(jobs: JobPosting[], usd: number): string {
+  const block = (list: JobPosting[], title: string) => {
+    if (list.length === 0) return `${title}\n<i>Nenhuma vaga nova desta vez.</i>`;
+    const items = list.map(
+      (j, i) => `<b>${i + 1}. ${esc(j.titulo)}</b> · ${esc(j.empresa)}
+📍 ${esc(j.local || "não informado")} · 💰 ${esc(j.salario)}${j.salario_ok ? "" : " ⚠️"}
+${esc(j.motivo)}
+🔗 ${esc(j.url)}`,
+    );
+    const short = list.length < JOBS_PER_REGION ? `\n<i>Só achei ${list.length} desta vez.</i>` : "";
+    return `${title}\n\n${items.join("\n\n")}${short}`;
+  };
+  const br = jobs.filter((j) => j.regiao === "br");
+  const intl = jobs.filter((j) => j.regiao === "intl");
+  return `💼 <b>Vagas da semana</b>
+
+${block(br, `🇧🇷 <b>Brasil</b> (a partir de R$ ${BR_MIN_SALARY.toLocaleString("pt-BR")})`)}
+
+${block(intl, "🌎 <b>Exterior</b> (remoto, aceita quem mora no Brasil)")}
+
+<i>⚠️ = o anúncio não informa salário dentro do mínimo; confira antes de se candidatar. Busca na web · ≈ US$ ${usd.toFixed(2)}</i>`;
+}
+
 export function topicButtons(n: number): InlineButton[][] {
   const buttons = Array.from({ length: n }, (_, i) => ({ text: `🎠 ${i + 1}`, data: `tp:${i}` }));
   const rows: InlineButton[][] = [];
@@ -327,6 +353,9 @@ export class Bot {
           return;
         case "conectar":
           await this.sendConnect(chatId);
+          return;
+        case "vagas":
+          await this.schedule({ kind: "jobs", chatId }, "💼 Procurando vagas que combinam com o seu currículo (Brasil e exterior)… chegam em 2–3 minutos.");
           return;
         case "temas":
           await this.schedule({ kind: "topics", chatId }, "🔎 Procurando o que está em alta em software, front-end e IA… os temas chegam em 1–2 minutos.");
@@ -610,6 +639,8 @@ export class Bot {
       }
       case "topics":
         return this.sendTopics(job.chatId);
+      case "jobs":
+        return this.sendJobs(job.chatId);
       case "image":
         return this.regenerateImage(job.chatId, job.carouselId, job.scene);
     }
@@ -770,6 +801,29 @@ Versão: <code>${esc(this.deps.version ?? "desconhecida")}</code>
 Fila: ${queue}
 Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · ${counts.failed ?? 0} com erro · ${counts.done ?? 0} feitos`,
     );
+  }
+
+  // ---------- /vagas ----------
+
+  /** Sábado, 10h (ou /vagas): 5 vagas no Brasil e 5 no exterior, sem repetir as já enviadas. */
+  async sendJobs(chatId: number): Promise<void> {
+    const { drafter, store, messenger } = this.deps;
+    const sent = JSON.parse((await store.getSetting("jobs_sent")) ?? "[]") as string[];
+    let found;
+    try {
+      found = await drafter.findJobs(sent);
+    } catch (err) {
+      await messenger.send(chatId, `⚠️ Não consegui buscar as vagas: ${esc(String((err as Error).message))}`);
+      return;
+    }
+    const jobs = selectJobs(found.items, found.links, sent, urlKey);
+    if (jobs.length === 0) {
+      await messenger.send(chatId, `Não achei vagas novas desta vez (o Claude sugeriu ${found.items.length}, a busca trouxe ${found.links.size} links). Tente /vagas de novo mais tarde.`);
+      return;
+    }
+    const keys = jobs.map((j) => urlKey(j.url)).filter((k): k is string => Boolean(k));
+    await store.setSetting("jobs_sent", JSON.stringify([...sent, ...keys].slice(-SENT_MEMORY)));
+    await messenger.send(chatId, jobsMessage(jobs, found.custo.usd));
   }
 
   // ---------- /temas ----------

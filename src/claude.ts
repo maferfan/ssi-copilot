@@ -2,8 +2,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Perfil } from "./perfil";
 import { buildCaption, type PostParts } from "./caption";
 import { normalizeCarousel } from "./carousel";
+import { jobsPrompt } from "./jobs";
 import { detectLanguage } from "./language";
-import { NotAPostError, type CarouselChart, type CarouselContent, type CarouselCost, type Drafter, type Post, type TopicIdea } from "./types";
+import { NotAPostError, type CarouselChart, type CarouselContent, type CarouselCost, type Drafter, type JobPosting, type Post, type TopicIdea } from "./types";
 
 export const MODEL = "claude-sonnet-5-5";
 
@@ -432,6 +433,13 @@ export class ClaudeDrafter implements Drafter {
   private async research(topic: string): Promise<{ items: ResearchItem[]; input: number; output: number; searches: number }> {
     const r = await this.searchAndAnswer(researchPrompt(topic), 6, "A pesquisa sobre esse tema");
     return { items: verifyResearch(parseJsonArray<ResearchItem>(r.text), r.seen), input: r.input, output: r.output, searches: r.searches };
+  }
+
+  async findJobs(exclude: string[]): Promise<{ items: JobPosting[]; custo: CarouselCost; links: Set<string> }> {
+    const r = await this.searchAndAnswer(jobsPrompt(this.perfil, new Date(), exclude), 10, "A busca de vagas");
+    const items = parseJsonArray<JobPosting>(r.text);
+    console.log("vagas", { sugeridas: items.length, links: r.seen.size, buscas: r.searches, inicio: r.text.slice(0, 120) });
+    return { items, custo: costOf(r), links: r.seen };
   }
 
   async suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost; sugeridos: number; links: number }> {

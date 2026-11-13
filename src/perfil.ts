@@ -22,6 +22,19 @@ export const perfil = {
   ],
   /** Exemplos de comentários seus. Quanto mais, melhor o tom. */
   exemplos: [] as string[],
+  /** Base da busca de vagas (/vagas), tirada do currículo. Sem dados de contato. */
+  curriculo: {
+    cargo: "Engenheiro de Software Full Stack (pleno)",
+    experiencia: "cerca de 3 anos (desde 2023), remoto",
+    stack: ["React", "Next.js", "TypeScript", "Node.js", "React Native", "Angular", "Redux", "Zustand", "Tailwind", "REST APIs", "AWS", "GCP", "Azure", "Docker", "Jest", "Cypress"],
+    destaques: [
+      "Otimizou aplicações usadas por mais de 1 milhão de usuários (gerenciamento de estado, desempenho)",
+      "Design system em React + TypeScript que reduziu em 50% o tempo de desenvolvimento",
+      "Usa IA no desenvolvimento (Claude) e construiu um bot com a Claude API em produção",
+    ],
+    idiomas: "Português nativo, inglês profissional pleno",
+    local: "Joinville, SC, Brasil (aceita remoto)",
+  },
   /** Perfis que você gosta de acompanhar: usados quando o dia passa sem posts salvos. */
   criadores: [] as { nome: string; url: string }[],
 };

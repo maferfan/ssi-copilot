@@ -68,6 +68,7 @@ const JOB_LABEL: Record<string, string> = {
   daily: "Gerar as sugestões de comentário",
   carousel: "Montar o carrossel",
   topics: "A busca de temas",
+  jobs: "A busca de vagas",
   image: "Trocar a imagem do carrossel",
 };
 
@@ -168,6 +169,15 @@ export default {
     // 21:00 UTC = 18:00 em Brasília
     if (controller.cron === CRONS.daily) {
       ctx.waitUntil(guarded(env, "A rodada das 18h", (bot) => bot.runScheduled()));
+    }
+    // 13:00 UTC de sábado = 10h em Brasília: vagas da semana
+    if (controller.cron === CRONS.jobs) {
+      ctx.waitUntil(
+        guarded(env, "As vagas de sábado", async (bot) => {
+          const chatId = await bot.ownerChat();
+          if (chatId !== null) await bot.sendJobs(chatId);
+        }),
+      );
     }
     // A cada minuto: roda os trabalhos longos pedidos pelo Telegram (até 15 min aqui, contra ~30 s no webhook)
     if (controller.cron === CRONS.queue) {
