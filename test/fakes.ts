@@ -7,6 +7,7 @@ import type {
   Drafter,
   Job,
   InlineButton,
+  JobPosting,
   LinkedIn,
   LinkedInConnection,
   Messenger,
@@ -157,7 +158,28 @@ export function sampleCarousel(titulo = "Como escolher a stack"): CarouselConten
   };
 }
 
+export const job = (over: Partial<JobPosting> = {}): JobPosting => ({
+  titulo: "Senior Frontend Engineer",
+  empresa: "Acme",
+  regiao: "br",
+  local: "Remoto (Brasil)",
+  salario: "R$ 14.000",
+  salario_ok: true,
+  motivo: "React e TypeScript, como no currículo.",
+  url: "https://www.linkedin.com/jobs/view/101",
+  ...over,
+});
+
 export class FakeDrafter implements Drafter {
+  jobCalls: string[][] = [];
+  jobResults: JobPosting[] = [
+    ...Array.from({ length: 6 }, (_, i) => job({ titulo: `BR ${i}`, url: `https://www.linkedin.com/jobs/view/10${i}`, salario_ok: i !== 0 })),
+    ...Array.from({ length: 6 }, (_, i) => job({ titulo: `Intl ${i}`, regiao: "intl", empresa: "Globex", local: "Remote (LATAM)", salario: "US$ 5k", url: `https://boards.greenhouse.io/globex/jobs/${i}` })),
+  ];
+  async findJobs(exclude: string[]) {
+    this.jobCalls.push(exclude);
+    return { items: this.jobResults, custo: { inputTokens: 1, outputTokens: 1, searches: 8, usd: 0.15 }, links: new Set(["linkedin.com/jobs/view/100", "boards.greenhouse.io/globex/jobs/0"]) };
+  }
   sceneCalls: string[] = [];
   async sceneToPrompt(scene: string) {
     this.sceneCalls.push(scene);

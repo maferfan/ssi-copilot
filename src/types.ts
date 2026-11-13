@@ -92,6 +92,7 @@ export type Job =
   | { kind: "daily" }
   | { kind: "carousel"; chatId: number; topic: string; previousId?: number; instructions?: string }
   | { kind: "topics"; chatId: number }
+  | { kind: "jobs"; chatId: number }
   /** Nova ilustração da capa; sem `scene`, usa a mesma ideia da anterior. */
   | { kind: "image"; chatId: number; carouselId: number; scene?: string };
 
@@ -169,6 +170,23 @@ export interface TopicIdea {
   conferido?: boolean;
 }
 
+/** Vaga encontrada na busca do /vagas. */
+export interface JobPosting {
+  titulo: string;
+  empresa: string;
+  regiao: "br" | "intl";
+  local: string;
+  /** Como está no anúncio, ou "não informado". */
+  salario: string;
+  /** O anúncio informa salário que atende ao mínimo (R$ 10 mil no Brasil). */
+  salario_ok: boolean;
+  /** 0 a 100: quanto o currículo atende aos requisitos (estimativa do Claude). */
+  aderencia?: number;
+  /** Por que combina com o currículo, em português. */
+  motivo: string;
+  url: string;
+}
+
 /** Gera a ilustração da capa. Devolve null se não der (o carrossel sai sem ela). */
 export interface Illustrator {
   generate(prompt: string): Promise<string | null>;
@@ -180,6 +198,8 @@ export interface Drafter {
   draftCarousel(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent>;
   /** Transforma a cena descrita pelo usuário (qualquer idioma) numa descrição em inglês para o Flux. */
   sceneToPrompt(scene: string): Promise<string>;
+  /** Busca vagas abertas que combinam com o currículo (Brasil e exterior). */
+  findJobs(exclude: string[]): Promise<{ items: JobPosting[]; custo: CarouselCost; links: Set<string> }>;
   /** Pesquisa na web os assuntos em alta (software, front-end, IA) e sugere temas de carrossel. */
   suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost; sugeridos: number; links: number }>;
 }
