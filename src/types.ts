@@ -93,7 +93,6 @@ export type Job =
   | { kind: "carousel"; chatId: number; topic: string; previousId?: number; instructions?: string }
   | { kind: "topics"; chatId: number }
   | { kind: "jobs"; chatId: number }
-  | { kind: "video"; chatId: number; topic: string; previousId?: number; instructions?: string }
   /** Nova ilustração da capa; sem `scene`, usa a mesma ideia da anterior. */
   | { kind: "image"; chatId: number; carouselId: number; scene?: string };
 
@@ -107,9 +106,7 @@ export type Awaiting =
   | { type: "carousel_adjust"; carouselId: number }
   | { type: "metrics"; week: string }
   | { type: "invites" }
-  | { type: "carousel_image"; carouselId: number }
-  | { type: "video_topic" }
-  | { type: "video_adjust"; videoId: number };
+  | { type: "carousel_image"; carouselId: number };
 
 export interface Store {
   getSetting(key: string): Promise<string | null>;
@@ -131,9 +128,6 @@ export interface Store {
   /** Pega os trabalhos pendentes e marca como "running" (cada um roda uma vez só). */
   takeJobs(limit: number): Promise<{ id: number; job: Job }[]>;
   finishJob(id: number, ok: boolean): Promise<void>;
-  addVideo(v: { topic: string; script: VideoScript; createdAt: string }): Promise<number>;
-  getVideo(id: number): Promise<Video | null>;
-  updateVideoStatus(id: number, status: Video["status"]): Promise<void>;
   /** Quantos trabalhos há em cada estado (pending, running, done, failed). */
   jobCounts(): Promise<Record<string, number>>;
   logAction(type: ActionType, refId: number | null, createdAt: string, value?: number | null): Promise<void>;
@@ -176,50 +170,6 @@ export interface TopicIdea {
   conferido?: boolean;
 }
 
-/** Fato conferido para o roteiro de vídeo (a fonte apareceu na busca). */
-export interface VideoFact {
-  id: string;
-  fato: string;
-  fonte: string;
-  ano: string;
-  url: string;
-}
-
-/** Um trecho do vídeo: o que você fala e a imagem que aparece enquanto isso. */
-export interface VideoBeat {
-  fala: string;
-  /** Descrição em inglês da imagem (para o Flux), mostrando exatamente o que a fala diz. */
-  imagem: string;
-  /** Uma a três palavras que aparecem grandes, em amarelo (opcional). */
-  destaque: string;
-  /** Id do fato citado neste trecho, se houver. */
-  fato_id: string;
-}
-
-/** Roteiro de ~1 minuto: abertura com você sentado e o título no meio, depois as cenas. */
-export interface VideoScript {
-  /** Frase curta que aparece no meio da tela nos primeiros segundos. */
-  titulo: string;
-  /** O que você fala nos primeiros ~3 s, aparecendo sentado. */
-  abertura: string;
-  trechos: VideoBeat[];
-  fechamento: string;
-  /** Texto do post (Instagram/TikTok), em português. */
-  legenda: string;
-  fatos: VideoFact[];
-  palavras: number;
-  segundos: number;
-  custo?: CarouselCost;
-}
-
-export interface Video {
-  id: number;
-  topic: string;
-  script: VideoScript;
-  status: "draft" | "discarded" | "recorded" | "rendered" | "posted";
-  created_at: string;
-}
-
 /** Vaga encontrada na busca do /vagas. */
 export interface JobPosting {
   titulo: string;
@@ -248,8 +198,6 @@ export interface Drafter {
   draftCarousel(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent>;
   /** Transforma a cena descrita pelo usuário (qualquer idioma) numa descrição em inglês para o Flux. */
   sceneToPrompt(scene: string): Promise<string>;
-  /** Roteiro de vídeo de ~1 minuto, com fatos conferidos; com previous + instructions, ajusta. */
-  draftVideo(topic: string, previous?: VideoScript, instructions?: string): Promise<VideoScript>;
   /** Busca vagas abertas que combinam com o currículo (Brasil e exterior). */
   findJobs(exclude: string[]): Promise<{ items: JobPosting[]; custo: CarouselCost; links: Set<string> }>;
   /** Pesquisa na web os assuntos em alta (software, front-end, IA) e sugere temas de carrossel. */

@@ -1,4 +1,3 @@
-import type { Video, VideoScript } from "./types";
 import type { ActionType, Carousel, CarouselContent, CarouselStatus, Job, Post, PostStatus, Store, WeeklyMetrics } from "./types";
 
 interface CarouselRow extends Omit<Carousel, "content"> {
@@ -134,24 +133,6 @@ export class D1Store implements Store {
       .bind(limit)
       .all<{ id: number; payload: string }>();
     return results.sort((a, b) => a.id - b.id).map((r) => ({ id: r.id, job: JSON.parse(r.payload) as Job }));
-  }
-
-  async addVideo(v: { topic: string; script: VideoScript; createdAt: string }) {
-    const row = await this.db
-      .prepare("INSERT INTO videos (topic, script, status, created_at) VALUES (?, ?, 'draft', ?) RETURNING id")
-      .bind(v.topic, JSON.stringify(v.script), v.createdAt)
-      .first<{ id: number }>();
-    if (!row) throw new Error("Falha ao salvar o roteiro");
-    return row.id;
-  }
-
-  async getVideo(id: number) {
-    const row = await this.db.prepare("SELECT * FROM videos WHERE id = ?").bind(id).first<Omit<Video, "script"> & { script: string }>();
-    return row ? { ...row, script: JSON.parse(row.script) as VideoScript } : null;
-  }
-
-  async updateVideoStatus(id: number, status: Video["status"]) {
-    await this.db.prepare("UPDATE videos SET status = ? WHERE id = ?").bind(status, id).run();
   }
 
   async jobCounts() {

@@ -69,7 +69,6 @@ const JOB_LABEL: Record<string, string> = {
   carousel: "Montar o carrossel",
   topics: "A busca de temas",
   jobs: "A busca de vagas",
-  video: "O roteiro do vídeo",
   image: "Trocar a imagem do carrossel",
 };
 

@@ -60,7 +60,6 @@ Nada é publicado ou enviado no LinkedIn sem eu ver antes. Isso respeita os term
 | `/agenda` | Carrosséis aprovados, com a sexta de cada um |
 | `/status` | Versão publicada, quando a fila rodou pela última vez e quantos pedidos estão esperando ou com erro |
 | `/vagas` | 5 vagas no Brasil (a partir de R$ 10 mil) e 5 no exterior (remoto aceitando Brasil), com base no currículo; sai sozinho no sábado às 10h |
-| `/video` | Roteiro de ~1 minuto para Reels/TikTok sobre psicologia e comportamento explicados pelos games: abertura com título, trechos com a imagem de cada cena, fontes conferidas e legenda |
 | `/temas` | 8 temas em alta (software, front-end e IA), cada um com gancho, motivo e fonte; um toque monta o carrossel |
 | `/fila` | Mostra os posts salvos e em que etapa cada um está |
 | `/semana` | Resumo da semana (segunda a domingo), comparado com a anterior |
@@ -168,8 +167,6 @@ falta o texto → aguardando 18h → sugestão enviada → aprovado → comentad
 
 **Vagas da semana (`/vagas`, [`src/jobs.ts`](src/jobs.ts)).** No sábado às 10h, o Claude busca na web vagas abertas nos últimos 30 dias que combinam com o currículo (em [`src/perfil.ts`](src/perfil.ts)): no Brasil, a partir de R$ 10 mil por mês; no exterior, remotas e aceitando quem mora no Brasil. Só entram vagas abertas, de preferência da última semana, em que a candidatura vai direto para a empresa: o site de carreira dela (inclusive o sistema de recrutamento, como Greenhouse ou Lever) ou o LinkedIn. Gupy, agregadores e sites de vagas genéricos, onde a candidatura raramente vira entrevista, ficam de fora, assim como grupos de WhatsApp/Telegram/Facebook/Discord e redes sociais. O código também confere que o site apareceu na busca, não repete vagas já enviadas e ordena por salário dentro do mínimo e, depois, pela aderência ao currículo (as sem salário informado vêm com ⚠️).
 
-**Roteiro de vídeo (`/video`, [`src/video.ts`](src/video.ts)).** Para Instagram/TikTok, no formato "rosto só no começo": nos primeiros ~3 segundos eu apareço sentado com o título grande no meio da tela; depois só a voz continua, e uma imagem em cima mostra exatamente o que cada frase diz. O roteiro sai em dois passos: o Claude busca na web 2 a 5 fatos (o conceito, o estudo por trás, a mecânica de jogo) e o código só mantém os que têm o site nos resultados da busca; depois ele escreve o roteiro com saída estruturada (título, abertura, 6 a 8 trechos com fala, descrição da imagem em inglês para o Flux, palavra de destaque e o fato citado, fechamento e legenda). O roteiro segue a estrutura gancho → nome do efeito → estudo → games → virada para a vida real → lição, com 150 a 170 palavras (~1 minuto). O código confere os fatos citados, conta as palavras e estima a duração. A edição automática a partir da gravação é a próxima etapa.
-
 **Temas em alta (`/temas`).** O Claude busca na web o que desenvolvedores estão discutindo nas últimas semanas (lançamentos, pesquisas, debates) em software, front-end e IA, e sugere 8 temas com gancho e motivo. Temas cujo site apareceu nos resultados da busca vêm primeiro; se forem menos de 4, os outros aparecem marcados "⚠️ fonte não conferida". Não são as métricas internas do LinkedIn, que não têm API pública.
 
 **Gráficos com fonte conferida, não inventada.** O carrossel é feito em dois passos ([`src/claude.ts`](src/claude.ts)):
@@ -227,7 +224,6 @@ O bot nunca trava por causa do LinkedIn.
 | [`src/perfil.ts`](src/perfil.ts) | Meu tom, regras, exemplos e perfis que acompanho |
 | [`src/claude.ts`](src/claude.ts) | Prompts e chamadas à Claude API (comentário e carrossel) |
 | [`src/linkedin-api.ts`](src/linkedin-api.ts) | OAuth, comentar e publicar pela API oficial do LinkedIn |
-| [`src/video.ts`](src/video.ts) | Prompts, esquema e conferência do roteiro de vídeo |
 | [`src/carousel.ts`](src/carousel.ts) | Modelo HTML dos slides e geração do PDF/imagens |
 | [`src/crypto.ts`](src/crypto.ts) | Criptografia do token do LinkedIn |
 | [`src/linkedin.ts`](src/linkedin.ts) | Extrair o link e ler a prévia pública do post |
@@ -313,8 +309,6 @@ npm run typecheck
 - [x] **Fase 2**: resumo de domingo, números semanais das Análises do LinkedIn e dashboard público
 - [x] **Fase 3**: conexão OAuth com o LinkedIn, comentários publicados ao aprovar, carrossel com prévia e publicação na sexta
 - [x] **Fase 4**: contador semanal de convites com meta (`/convites`). Uma versão anterior buscava 50 recrutadores por semana com a busca na web do Claude e abria os perfis em abas; saiu por ser trabalhosa demais no uso real, e ficou só o registro.
-- [x] **Fase 5**: vagas da semana (`/vagas`) e roteiro de vídeo curto (`/video`)
-- [ ] **Fase 6**: edição automática do vídeo: mando a gravação pelo Telegram, a transcrição marca o tempo de cada frase e o vídeo sai montado com a abertura, as imagens de cada cena e as legendas
 
 ## Licença
 
