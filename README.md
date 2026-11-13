@@ -130,7 +130,7 @@ flowchart LR
 | **TypeScript** | Linguagem | Tipos pegam erros antes do deploy (ex.: um status de post que não existe) | JavaScript puro |
 | **Wrangler** | CLI da Cloudflare | Publica o Worker, aplica migrações e grava segredos; o `wrangler.toml` descreve tudo em texto | Configurar à mão no painel |
 | **GitHub Actions** | CI e deploy | Testa cada pull request e publica cada push na `main`, sem instalar nada no computador | Deploy manual |
-| **Vitest** | Testes | Rápido, roda TypeScript direto; 171 testes em cerca de 1 segundo | Jest |
+| **Vitest** | Testes | Rápido, roda TypeScript direto; 173 testes em cerca de 1 segundo | Jest |
 
 ### Técnicas de engenharia
 
@@ -165,7 +165,7 @@ falta o texto → aguardando 18h → sugestão enviada → aprovado → comentad
 
 **Trocar só a imagem.** O botão 🖼️ Outra imagem gera outra ilustração com a mesma cena ou com uma cena escrita pelo usuário (o Claude passa para inglês), sem reescrever o texto.
 
-**Vagas da semana (`/vagas`, [`src/jobs.ts`](src/jobs.ts)).** No sábado às 10h, o Claude busca na web vagas abertas nos últimos 30 dias que combinam com o currículo (em [`src/perfil.ts`](src/perfil.ts)): no Brasil, a partir de R$ 10 mil por mês; no exterior, remotas e aceitando quem mora no Brasil. O código fica só com links de sites que apareceram na busca, tira grupos de WhatsApp/Telegram/Facebook/Discord e redes sociais, não repete vagas já enviadas e põe primeiro as que informam salário dentro do mínimo (as outras vêm com ⚠️).
+**Vagas da semana (`/vagas`, [`src/jobs.ts`](src/jobs.ts)).** No sábado às 10h, o Claude busca na web vagas abertas nos últimos 30 dias que combinam com o currículo (em [`src/perfil.ts`](src/perfil.ts)): no Brasil, a partir de R$ 10 mil por mês; no exterior, remotas e aceitando quem mora no Brasil. Só entram vagas abertas, de preferência da última semana, em que a candidatura vai direto para a empresa: o site de carreira dela (inclusive o sistema de recrutamento, como Greenhouse ou Lever) ou o LinkedIn. Gupy, agregadores e sites de vagas genéricos, onde a candidatura raramente vira entrevista, ficam de fora, assim como grupos de WhatsApp/Telegram/Facebook/Discord e redes sociais. O código também confere que o site apareceu na busca, não repete vagas já enviadas e ordena por salário dentro do mínimo e, depois, pela aderência ao currículo (as sem salário informado vêm com ⚠️).
 
 **Temas em alta (`/temas`).** O Claude busca na web o que desenvolvedores estão discutindo nas últimas semanas (lançamentos, pesquisas, debates) em software, front-end e IA, e sugere 8 temas com gancho e motivo. Temas cujo site apareceu nos resultados da busca vêm primeiro; se forem menos de 4, os outros aparecem marcados "⚠️ fonte não conferida". Não são as métricas internas do LinkedIn, que não têm API pública.
 

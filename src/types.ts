@@ -180,6 +180,8 @@ export interface JobPosting {
   salario: string;
   /** O anúncio informa salário que atende ao mínimo (R$ 10 mil no Brasil). */
   salario_ok: boolean;
+  /** 0 a 100: quanto o currículo atende aos requisitos (estimativa do Claude). */
+  aderencia?: number;
   /** Por que combina com o currículo, em português. */
   motivo: string;
   url: string;

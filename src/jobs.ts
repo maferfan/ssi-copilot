@@ -10,6 +10,20 @@ export const SENT_MEMORY = 400;
 /** Grupos e redes onde vaga circula sem anúncio oficial: ficam de fora. */
 const GROUP_HOSTS = /(^|\.)(chat\.whatsapp\.com|wa\.me|t\.me|telegram\.me|facebook\.com|fb\.com|discord\.gg|discord\.com|instagram\.com|twitter\.com|x\.com)$/i;
 
+/**
+ * Plataformas de massa, onde a candidatura raramente vira entrevista (pedido do usuário):
+ * Gupy e agregadores/sites de vagas genéricos. Ficam só a página de carreira da empresa
+ * (inclusive o sistema de recrutamento dela, como Greenhouse ou Lever) e o LinkedIn.
+ */
+const MASS_HOSTS =
+  /(^|\.)(gupy\.io|gupy\.com\.br|programathor\.com\.br|revelo\.com\.br|revelo\.com|trampos\.co|vagas\.com\.br|infojobs\.com\.br|catho\.com\.br|indeed\.com|indeed\.com\.br|glassdoor\.com|glassdoor\.com\.br|remotive\.com|weworkremotely\.com|himalayas\.app|wellfound\.com|remoteok\.com|jooble\.org|talent\.com|bne\.com\.br|empregos\.com\.br|solides\.jobs|99jobs\.com|kenoby\.com|jobs\.solides\.com\.br)$/i;
+
+/** O link é de onde a candidatura chega direto: site/ATS da empresa ou LinkedIn. */
+export function isDirectListing(url: string): boolean {
+  const h = host(url);
+  return Boolean(h && !GROUP_HOSTS.test(h) && !MASS_HOSTS.test(h));
+}
+
 export function jobsPrompt(p: Perfil, today: Date, exclude: string[]): string {
   const cv = p.curriculo;
   const skip = exclude.length ? `\n\nAlready sent before (do not repeat):\n${exclude.slice(-150).join("\n")}` : "";
@@ -27,15 +41,18 @@ Search for two groups, ${JOBS_PER_REGION} or more candidates each (the code pick
 2. "intl": remote jobs at companies outside Brazil that hire people living in Brazil or LATAM (contractor or employer of record).
 
 Rules:
-- Only real, currently open listings posted in the last 30 days, from company career pages or job boards (LinkedIn Jobs, Gupy, Greenhouse, Lever, Ashby, Workable, Wellfound, Remotive, We Work Remotely, Himalayas, Programathor, Revelo, Trampos).
-- Exclude: jobs shared in WhatsApp/Telegram/Facebook/Discord groups, social media posts, reposts on aggregator lists, "banco de talentos", internships, junior roles, and roles that clearly do not fit the stack.
+- Only real listings that are still open (accepting applications), posted in the last 21 days; prefer the last 7 days, when fewer people have applied.
+- Only where the application goes straight to the company: the company's own careers page (including its applicant tracking system, e.g. Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Teamtailor) or LinkedIn Jobs.
+- Exclude: Gupy, Catho, InfoJobs, Vagas.com, Indeed, Glassdoor, Programathor, Revelo, Trampos, Remotive, We Work Remotely, Himalayas, Wellfound and other job aggregators; jobs shared in WhatsApp/Telegram/Facebook/Discord groups; social media posts; "banco de talentos"; internships; junior roles; roles that clearly do not fit the stack.
+- Prefer roles where the CV is a strong match (most required skills present), so the candidate has a real chance of getting an interview.
 - Front-end, full-stack or React/TypeScript/Node roles. Mid-level or senior.
 - "url" must be copied exactly from a search result you got in this conversation (the listing page).
 - "salario": exactly as the listing states it, or "não informado". "salario_ok": true only if the listing states a salary that meets the minimum (for "intl", true if a salary is stated).
 - "motivo": in Brazilian Portuguese, one sentence on why it fits the candidate's CV.
+- "aderencia": 0 to 100, how well the CV matches the listed requirements.
 
 Reply at the end with ONLY a JSON array, no text before or after:
-[{"titulo": "...", "empresa": "...", "regiao": "br" | "intl", "local": "...", "salario": "...", "salario_ok": true, "motivo": "...", "url": "https://..."}]${skip}`;
+[{"titulo": "...", "empresa": "...", "regiao": "br" | "intl", "local": "...", "salario": "...", "salario_ok": true, "aderencia": 85, "motivo": "...", "url": "https://..."}]${skip}`;
 }
 
 function host(url: string): string | null {
@@ -47,8 +64,9 @@ function host(url: string): string | null {
 }
 
 /**
- * Até 5 vagas por região: só links de sites que apareceram na busca, sem grupos/redes,
- * sem repetir as já enviadas; as que informam salário dentro do mínimo vêm primeiro.
+ * Até 5 vagas por região: só links de sites que apareceram na busca e que levam direto à
+ * empresa (sem Gupy, agregadores, grupos ou redes), sem repetir as já enviadas; primeiro as
+ * que informam salário dentro do mínimo, depois as de maior aderência ao currículo.
  */
 export function selectJobs(items: JobPosting[], seen: Set<string>, sent: string[], key: (url: string) => string | null): JobPosting[] {
   const seenHosts = new Set([...seen].map((k) => k.split("/")[0]));
@@ -57,7 +75,7 @@ export function selectJobs(items: JobPosting[], seen: Set<string>, sent: string[
   for (const it of items) {
     const h = it?.url ? host(it.url) : null;
     const k = it?.url ? key(it.url) : null;
-    if (!h || !k || GROUP_HOSTS.test(h) || !seenHosts.has(h) || sentSet.has(k)) continue;
+    if (!h || !k || !isDirectListing(it.url) || !seenHosts.has(h) || sentSet.has(k)) continue;
     if (!it.titulo?.trim() || !it.empresa?.trim()) continue;
     if (ok.some((o) => key(o.url) === k || (o.titulo === it.titulo && o.empresa === it.empresa))) continue;
     ok.push({
@@ -67,6 +85,7 @@ export function selectJobs(items: JobPosting[], seen: Set<string>, sent: string[
       local: (it.local ?? "").trim(),
       salario: (it.salario ?? "").trim() || "não informado",
       salario_ok: Boolean(it.salario_ok),
+      aderencia: Math.max(0, Math.min(100, Math.round(Number(it.aderencia) || 0))),
       motivo: (it.motivo ?? "").trim(),
       url: it.url,
     });
@@ -74,7 +93,7 @@ export function selectJobs(items: JobPosting[], seen: Set<string>, sent: string[
   const pick = (regiao: JobPosting["regiao"]) =>
     ok
       .filter((j) => j.regiao === regiao)
-      .sort((a, b) => Number(b.salario_ok) - Number(a.salario_ok))
+      .sort((a, b) => Number(b.salario_ok) - Number(a.salario_ok) || (b.aderencia ?? 0) - (a.aderencia ?? 0))
       .slice(0, JOBS_PER_REGION);
   return [...pick("br"), ...pick("intl")];
 }

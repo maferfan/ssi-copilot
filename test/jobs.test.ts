@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Bot } from "../src/bot";
 import { urlKey } from "../src/claude";
-import { jobsPrompt, selectJobs } from "../src/jobs";
+import { isDirectListing, jobsPrompt, selectJobs } from "../src/jobs";
 import { perfil } from "../src/perfil";
 import { job, makeDeps, msg } from "./fakes";
 
@@ -12,13 +12,13 @@ async function setup() {
   return { ...ctx, bot };
 }
 
-const SEEN = new Set(["acme.gupy.io/jobs/0", "boards.greenhouse.io/x"]);
+const SEEN = new Set(["linkedin.com/jobs/view/100", "boards.greenhouse.io/x"]);
 
 describe("selectJobs", () => {
   it("5 por região, com salário dentro do mínimo primeiro", () => {
     const items = [
-      job({ titulo: "Sem salário", salario: "não informado", salario_ok: false, url: "https://acme.gupy.io/jobs/a" }),
-      ...Array.from({ length: 5 }, (_, i) => job({ titulo: `BR ${i}`, url: `https://acme.gupy.io/jobs/b${i}` })),
+      job({ titulo: "Sem salário", salario: "não informado", salario_ok: false, url: "https://www.linkedin.com/jobs/view/10a" }),
+      ...Array.from({ length: 5 }, (_, i) => job({ titulo: `BR ${i}`, url: `https://www.linkedin.com/jobs/view/10b${i}` })),
       ...Array.from({ length: 6 }, (_, i) => job({ titulo: `Intl ${i}`, regiao: "intl", url: `https://boards.greenhouse.io/x/${i}` })),
     ];
     const out = selectJobs(items, SEEN, [], urlKey);
@@ -33,25 +33,61 @@ describe("selectJobs", () => {
         job({ titulo: "Telegram", url: "https://t.me/vagasdev/123" }),
         job({ titulo: "Facebook", url: "https://www.facebook.com/groups/devs/posts/1" }),
         job({ titulo: "Inventada", url: "https://inventada.example/vaga" }),
-        job({ titulo: "Já enviada", url: "https://acme.gupy.io/jobs/old" }),
-        job({ titulo: "Boa", url: "https://acme.gupy.io/jobs/new" }),
-        job({ titulo: "Boa", url: "https://acme.gupy.io/jobs/new/" }),
+        job({ titulo: "Já enviada", url: "https://www.linkedin.com/jobs/view/10old" }),
+        job({ titulo: "Boa", url: "https://www.linkedin.com/jobs/view/10new" }),
+        job({ titulo: "Boa", url: "https://www.linkedin.com/jobs/view/10new/" }),
       ],
       SEEN,
-      ["acme.gupy.io/jobs/old"],
+      ["linkedin.com/jobs/view/10old"],
       urlKey,
     );
     expect(out.map((j) => j.titulo)).toEqual(["Boa"]);
   });
 
+  it("só candidatura direta: tira Gupy e agregadores; aceita LinkedIn e página/ATS da empresa", () => {
+    const seen = new Set(["gupy.io", "acme.gupy.io/x", "programathor.com.br/x", "remotive.com/x", "linkedin.com/jobs/view/1", "careers.acme.com/x", "jobs.lever.co/acme", "boards.greenhouse.io/x"]);
+    const out = selectJobs(
+      [
+        job({ titulo: "Gupy", url: "https://acme.gupy.io/jobs/9" }),
+        job({ titulo: "Programathor", url: "https://programathor.com.br/jobs/9" }),
+        job({ titulo: "Remotive", regiao: "intl", url: "https://remotive.com/remote-jobs/9" }),
+        job({ titulo: "LinkedIn", url: "https://www.linkedin.com/jobs/view/1" }),
+        job({ titulo: "Site da empresa", url: "https://careers.acme.com/jobs/9" }),
+        job({ titulo: "Lever", regiao: "intl", url: "https://jobs.lever.co/acme/9" }),
+      ],
+      seen,
+      [],
+      urlKey,
+    );
+    expect(out.map((j) => j.titulo)).toEqual(["LinkedIn", "Site da empresa", "Lever"]);
+    expect(isDirectListing("https://empresa.gupy.io/jobs/1")).toBe(false);
+  });
+
+  it("entre as com salário dentro do mínimo, maior aderência ao currículo primeiro", () => {
+    const seen = new Set(["linkedin.com/jobs/view/1"]);
+    const out = selectJobs(
+      [
+        job({ titulo: "Baixa", aderencia: 40, url: "https://www.linkedin.com/jobs/view/1" }),
+        job({ titulo: "Alta", aderencia: 92, url: "https://www.linkedin.com/jobs/view/2" }),
+        job({ titulo: "Sem salário", aderencia: 99, salario_ok: false, url: "https://www.linkedin.com/jobs/view/3" }),
+      ],
+      seen,
+      [],
+      urlKey,
+    );
+    expect(out.map((j) => j.titulo)).toEqual(["Alta", "Baixa", "Sem salário"]);
+  });
+
   it("o pedido usa o currículo, as duas regiões e o mínimo de R$ 10 mil", () => {
-    const p = jobsPrompt(perfil, new Date("2026-11-14T00:00:00Z"), ["acme.gupy.io/jobs/old"]);
+    const p = jobsPrompt(perfil, new Date("2026-11-14T00:00:00Z"), ["linkedin.com/jobs/view/10old"]);
     expect(p).toContain("Engenheiro de Software Full Stack");
     expect(p).toContain("React, Next.js, TypeScript");
     expect(p).toContain("R$ 10.000 per month");
     expect(p).toContain("hire people living in Brazil or LATAM");
     expect(p).toContain("WhatsApp/Telegram/Facebook/Discord groups");
-    expect(p).toContain("acme.gupy.io/jobs/old");
+    expect(p).toContain("Exclude: Gupy");
+    expect(p).toContain("still open");
+    expect(p).toContain("linkedin.com/jobs/view/10old");
   });
 });
 

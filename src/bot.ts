@@ -224,7 +224,7 @@ export function jobsMessage(jobs: JobPosting[], usd: number): string {
     if (list.length === 0) return `${title}\n<i>Nenhuma vaga nova desta vez.</i>`;
     const items = list.map(
       (j, i) => `<b>${i + 1}. ${esc(j.titulo)}</b> · ${esc(j.empresa)}
-📍 ${esc(j.local || "não informado")} · 💰 ${esc(j.salario)}${j.salario_ok ? "" : " ⚠️"}
+📍 ${esc(j.local || "não informado")} · 💰 ${esc(j.salario)}${j.salario_ok ? "" : " ⚠️"}${j.aderencia ? ` · 🎯 ${j.aderencia}% de aderência` : ""}
 ${esc(j.motivo)}
 🔗 ${esc(j.url)}`,
     );
