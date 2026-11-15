@@ -1,5 +1,5 @@
 import { detectLanguage } from "./language";
-import { BR_MIN_SALARY, JOBS_PER_REGION, selectJobs, SENT_MEMORY } from "./jobs";
+import { BR_MIN_SALARY, JOBS_PER_REGION, selectJobs, SENT_MEMORY, type JobRejects } from "./jobs";
 import { urlKey } from "./claude";
 import { extractLinkedInUrl, extractPostUrn, isBoilerplate, isLoginWall, textAroundUrl } from "./linkedin";
 import type { Perfil } from "./perfil";
@@ -104,6 +104,18 @@ Domingo às 18h chega o resumo da semana e eu peço 3 números das Análises do 
 /metricas — registrar os números da semana
 /painel — link do dashboard
 /convites — registrar convites e ver quantos faltam`;
+
+/** Por que as sugestões do Claude não viraram vaga (para entender um /vagas vazio). */
+export function rejectsLine(sugeridas: number, links: number, r: JobRejects): string {
+  if (sugeridas === 0) return `O Claude não devolveu nenhuma vaga (a busca trouxe ${links} links).`;
+  const parts = [
+    r.plataforma && `${r.plataforma} em Gupy/agregadores`,
+    r.fora_da_busca && `${r.fora_da_busca} com link que não apareceu na busca`,
+    r.ja_enviada && `${r.ja_enviada} já enviadas antes`,
+    r.incompleta && `${r.incompleta} sem link, título ou empresa`,
+  ].filter(Boolean);
+  return `O Claude sugeriu ${sugeridas}, mas nenhuma passou nos filtros: ${parts.join(", ")}.`;
+}
 
 /** "/convites 12", "+12" ou "-3" → 12, 12, -3. */
 export function parseInviteCount(text: string): number | null {
@@ -816,9 +828,11 @@ Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · $
       await messenger.send(chatId, `⚠️ Não consegui buscar as vagas: ${esc(String((err as Error).message))}`);
       return;
     }
-    const jobs = selectJobs(found.items, found.links, sent, urlKey);
+    const rejects: JobRejects = { plataforma: 0, fora_da_busca: 0, ja_enviada: 0, incompleta: 0 };
+    const jobs = selectJobs(found.items, found.links, sent, urlKey, rejects);
+    console.log("vagas filtradas", { sugeridas: found.items.length, mantidas: jobs.length, ...rejects });
     if (jobs.length === 0) {
-      await messenger.send(chatId, `Não achei vagas novas desta vez (o Claude sugeriu ${found.items.length}, a busca trouxe ${found.links.size} links). Tente /vagas de novo mais tarde.`);
+      await messenger.send(chatId, `Não achei vagas novas desta vez. ${rejectsLine(found.items.length, found.links.size, rejects)}\n\nTente /vagas de novo mais tarde.`);
       return;
     }
     const keys = jobs.map((j) => urlKey(j.url)).filter((k): k is string => Boolean(k));
