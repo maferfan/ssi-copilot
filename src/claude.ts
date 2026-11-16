@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Perfil } from "./perfil";
-import { buildCaption, type PostParts } from "./caption";
+import { buildCaption, type PostParts, type PostTextParts } from "./caption";
 import { normalizeCarousel } from "./carousel";
 import { jobsPrompt } from "./jobs";
 import { detectLanguage } from "./language";
@@ -217,6 +217,7 @@ What a good carousel looks like:
   - "conclusao": one sentence with the main lesson or your opinion.
   - "pergunta": one specific question people can answer from their own experience (not "what do you think?").
   - "hashtags": 3 relevant hashtags, without the # sign.
+- "post_pt": the same post text in Brazilian Portuguese (titulo, gancho, pontos, conclusao, pergunta), written naturally for Brazilian developers, not a word-by-word translation. Keep the same numbers and ideas. The post is published in both languages, Portuguese first.
 - Practical, specific, no fluff. Tone: ${p.tom.join(" ")}`;
 }
 
@@ -246,7 +247,7 @@ const CHART_SCHEMA = {
 const CAROUSEL_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["titulo", "subtitulo", "grafico_capa", "imagem_prompt", "slides", "fechamento", "post"],
+  required: ["titulo", "subtitulo", "grafico_capa", "imagem_prompt", "slides", "fechamento", "post", "post_pt"],
   properties: {
     titulo: { type: "string", description: "Cover title" },
     subtitulo: { type: "string", description: "One line under the cover title" },
@@ -279,6 +280,19 @@ const CAROUSEL_SCHEMA = {
         conclusao: { type: "string" },
         pergunta: { type: "string" },
         hashtags: { type: "array", items: { type: "string" }, description: "3 hashtags without #" },
+      },
+    },
+    post_pt: {
+      type: "object",
+      additionalProperties: false,
+      description: "The same post text in Brazilian Portuguese",
+      required: ["titulo", "gancho", "pontos", "conclusao", "pergunta"],
+      properties: {
+        titulo: { type: "string", description: "Título, até 60 caracteres" },
+        gancho: { type: "string", description: "Gancho antes do 'ver mais', até 160 caracteres" },
+        pontos: { type: "array", items: { type: "string" }, description: "3 ou 4 pontos" },
+        conclusao: { type: "string" },
+        pergunta: { type: "string" },
       },
     },
   },
@@ -471,6 +485,7 @@ export class ClaudeDrafter implements Drafter {
     const draft = JSON.parse(json) as Omit<CarouselContent, "slides" | "capa_grafico"> & {
       grafico_capa?: DraftChart;
       post?: PostParts;
+      post_pt?: PostTextParts;
       slides: { titulo: string; texto: string; grafico?: DraftChart }[];
     };
     const custo = costOf({
@@ -483,8 +498,8 @@ export class ClaudeDrafter implements Drafter {
       draft.slides.map((s) => ({ titulo: s.titulo, texto: s.texto, grafico: buildChart(s.grafico, research.items) })),
       research.items,
     );
-    const { grafico_capa: _ignored, post, ...rest } = draft;
-    const legenda = post ? buildCaption(post) : (rest.legenda ?? "");
+    const { grafico_capa: _ignored, post, post_pt, ...rest } = draft;
+    const legenda = post ? buildCaption(post, post_pt) : (rest.legenda ?? "");
     return normalizeCarousel({ ...rest, legenda, capa_grafico: cover, slides, custo });
   }
 

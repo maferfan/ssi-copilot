@@ -50,7 +50,7 @@ export interface CarouselContent {
   capa_grafico?: CarouselChart;
   /** Descrição (em inglês) da ilustração da capa, escrita pelo Claude. */
   imagem_prompt?: string;
-  /** Ilustração da capa gerada pelo Flux (data URL JPEG); fica guardada para a publicação de sexta. */
+  /** Ilustração da capa gerada pelo Flux (data URL JPEG); fica guardada para a publicação. */
   capa_imagem?: string;
   slides: { titulo: string; texto: string; grafico?: CarouselChart }[];
   fechamento: { titulo: string; texto: string };
@@ -62,7 +62,7 @@ export interface CarouselContent {
 
 export type CarouselStatus =
   | "draft" // prévia enviada, aguardando decisão
-  | "approved" // agendado para a próxima sexta, 18h
+  | "approved" // agendado (terça, 8h30)
   | "published"
   | "failed" // a publicação automática falhou; o PDF foi enviado para postar à mão
   | "discarded";
@@ -75,7 +75,7 @@ export interface Carousel {
   created_at: string;
   published_at: string | null;
   post_url: string | null;
-  /** Sexta em que sai (AAAA-MM-DD, horário de Brasília); só para aprovados. */
+  /** Dia em que sai (AAAA-MM-DD, horário de Brasília); só para aprovados. */
   scheduled_for: string | null;
 }
 

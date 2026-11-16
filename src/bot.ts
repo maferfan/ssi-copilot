@@ -49,30 +49,38 @@ function addDays(date: string, days: number): string {
   return new Date(new Date(`${date}T12:00:00Z`).getTime() + days * DAY_MS).toISOString().slice(0, 10);
 }
 
-/** Primeira sexta que ainda dá para publicar: hoje, se for sexta antes das 18h; senão, a próxima. */
-export function firstFriday(now: Date): string {
+/** Dia e hora da publicação do carrossel (Brasília): terça, 8h30. Precisa bater com CRONS.publish. */
+export const PUBLISH_WEEKDAY = 2;
+export const PUBLISH_MINUTES = 8 * 60 + 30;
+export const PUBLISH_TIME = "8h30";
+const WEEKDAYS = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
+const PUBLISH_DAY = WEEKDAYS[PUBLISH_WEEKDAY];
+
+/** Primeiro dia de publicação possível: hoje, se for o dia e ainda não deu a hora; senão, o próximo. */
+export function firstSlot(now: Date): string {
   const b = brt(now);
   const day = b.getUTCDay();
-  if (day === 5 && b.getUTCHours() < 18) return brDate(now);
-  return addDays(brDate(now), (5 - day + 7) % 7 || 7);
+  if (day === PUBLISH_WEEKDAY && b.getUTCHours() * 60 + b.getUTCMinutes() < PUBLISH_MINUTES) return brDate(now);
+  return addDays(brDate(now), (PUBLISH_WEEKDAY - day + 7) % 7 || 7);
 }
 
-/** Próxima sexta sem carrossel agendado: se a primeira está ocupada, a seguinte, e assim por diante. */
-export function nextFreeFriday(now: Date, taken: (string | null)[]): string {
-  let date = firstFriday(now);
+/** Próximo dia de publicação sem carrossel agendado: se o primeiro está ocupado, a semana seguinte, e assim por diante. */
+export function nextFreeSlot(now: Date, taken: (string | null)[]): string {
+  let date = firstSlot(now);
   while (taken.includes(date)) date = addDays(date, 7);
   return date;
 }
 
-/** "hoje (sexta) às 18h" ou "sexta, 13/11, às 18h". */
-export function fridayLabel(date: string, now: Date): string {
-  if (date === brDate(now)) return "hoje (sexta) às 18h";
-  return `sexta, ${date.slice(8, 10)}/${date.slice(5, 7)}, às 18h`;
+/** "hoje (terça) às 8h30" ou "terça, 17/11, às 8h30" (o dia da semana sai da própria data). */
+export function slotLabel(date: string, now: Date): string {
+  const day = WEEKDAYS[new Date(`${date}T12:00:00Z`).getUTCDay()];
+  if (date === brDate(now)) return `hoje (${day}) às ${PUBLISH_TIME}`;
+  return `${day}, ${date.slice(8, 10)}/${date.slice(5, 7)}, às ${PUBLISH_TIME}`;
 }
 
-/** Quando sairia um carrossel aprovado agora (respeitando a fila de sextas). */
+/** Quando sairia um carrossel aprovado agora (respeitando a fila). */
 export function nextPublishLabel(now: Date, taken: (string | null)[] = []): string {
-  return fridayLabel(nextFreeFriday(now, taken), now);
+  return slotLabel(nextFreeSlot(now, taken), now);
 }
 
 const HELP = `<b>Como funciona</b>
@@ -82,10 +90,10 @@ const HELP = `<b>Como funciona</b>
 2. Todo dia às <b>18h</b> chegam até ${DAILY_LIMIT} sugestões de comentário.
 3. ✅ Aprovar publica o comentário direto no LinkedIn. Também dá para pedir outra versão, editar ou pular.
 
-<b>Carrossel de sexta</b>
+<b>Carrossel da semana</b>
 1. Mande <code>/carrossel</code> e o tema, por exemplo: <code>/carrossel como escolher a stack de um site</code>. Sem ideia? <code>/temas</code> sugere assuntos em alta.
 2. Eu monto os slides e mando a prévia.
-3. Aprovado, ele entra na próxima sexta livre, às 18h. Se a sexta já tiver um, vai para a seguinte.
+3. Aprovado, ele entra na próxima ${PUBLISH_DAY} livre, às ${PUBLISH_TIME}. Se ela já tiver um, vai para a semana seguinte. O texto sai em português e em inglês.
 
 <b>Convites</b>
 Meta: ${WEEKLY_INVITE_GOAL} convites por semana. Mandou alguns? Registre com <code>/convites 10</code> (para corrigir, <code>/convites -2</code>). <code>/convites</code> sozinho mostra quantos faltam.
@@ -95,7 +103,7 @@ Domingo às 18h chega o resumo da semana e eu peço 3 números das Análises do 
 
 /vagas — 5 vagas no Brasil e 5 no exterior (sai sozinho no sábado)
 /temas — temas em alta para o próximo carrossel
-/agenda — carrosséis agendados, por sexta
+/agenda — carrosséis agendados, por data
 /status — versão do bot e situação da fila
 /conectar — conectar o LinkedIn (vale por 2 meses)
 /agora — gerar as sugestões de comentário agora
@@ -734,9 +742,9 @@ export class Bot {
       case "ca": {
         await messenger.answerCallback(callbackId, "Agendado!");
         const queue = await store.listCarousels(["approved"]);
-        const slot = nextFreeFriday(this.deps.now(), queue.map((q) => q.scheduled_for));
+        const slot = nextFreeSlot(this.deps.now(), queue.map((q) => q.scheduled_for));
         await store.updateCarousel(id, { status: "approved", scheduled_for: slot });
-        const label = fridayLabel(slot, this.deps.now());
+        const label = slotLabel(slot, this.deps.now());
         const note = queue.length ? `\n<i>${queue.length === 1 ? "Já há 1 carrossel" : `Já há ${queue.length} carrosséis`} na fila antes dele. Veja em /agenda.</i>` : "";
         await messenger.edit(chatId, messageId, `${carouselCard(c, label)}\n\n✅ <b>Agendado: ${label}.</b>${note}`);
         return;
@@ -780,14 +788,14 @@ export class Bot {
     return nextPublishLabel(this.deps.now(), queue.map((q) => q.scheduled_for));
   }
 
-  /** /agenda: carrosséis aprovados, na ordem das sextas. */
+  /** /agenda: carrosséis aprovados, por data. */
   private async sendAgenda(chatId: number) {
     const queue = (await this.deps.store.listCarousels(["approved"])).sort((a, b) => (a.scheduled_for ?? "").localeCompare(b.scheduled_for ?? ""));
     if (queue.length === 0) {
       await this.deps.messenger.send(chatId, "📅 Nenhum carrossel agendado. Mande <code>/carrossel</code> e o tema.");
       return;
     }
-    const lines = queue.map((q) => `• ${q.scheduled_for ? fridayLabel(q.scheduled_for, this.deps.now()) : "próxima sexta"} — ${esc(q.content.titulo.replace(/\*\*/g, ""))}`);
+    const lines = queue.map((q) => `• ${q.scheduled_for ? slotLabel(q.scheduled_for, this.deps.now()) : `próxima ${PUBLISH_DAY}`} — ${esc(q.content.titulo.replace(/\*\*/g, ""))}`);
     await this.deps.messenger.send(chatId, `📅 <b>Carrosséis agendados</b>\n\n${lines.join("\n")}\n\n<i>Para tirar um da fila, toque em ❌ Descartar no cartão dele.</i>`);
   }
 
@@ -874,12 +882,12 @@ Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · $
     await this.requestCarousel(chatId, topic.gancho ? `${topic.titulo} — ${topic.gancho}` : topic.titulo);
   }
 
-  /** Sexta, 18h: publica o carrossel agendado para hoje. */
+  /** Terça, 8h30 (cron próprio): publica o carrossel agendado para hoje. */
   async publishCarousel(): Promise<void> {
     const { store, messenger, renderer, linkedin } = this.deps;
     const chatId = await this.ownerChat();
     if (chatId === null) return;
-    // Sai o agendado para hoje (ou um atrasado, se uma sexta passou sem publicar); os outros esperam a vez
+    // Sai o agendado para hoje (ou um atrasado, se um dia de publicação passou sem publicar); os outros esperam a vez
     const today = brDate(this.deps.now());
     const queue = await store.listCarousels(["approved"]);
     const c = queue
@@ -887,8 +895,8 @@ Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · $
       .sort((a, b) => (a.scheduled_for ?? "").localeCompare(b.scheduled_for ?? ""))[0];
     if (!c) {
       const next = queue.filter((q) => q.scheduled_for).sort((a, b) => a.scheduled_for!.localeCompare(b.scheduled_for!))[0];
-      const tail = next ? ` O próximo sai ${fridayLabel(next.scheduled_for!, this.deps.now())}.` : "";
-      await messenger.send(chatId, `🎠 Sexta, 18h: não havia carrossel agendado para hoje, então nada foi publicado.${tail}`);
+      const tail = next ? ` O próximo sai ${slotLabel(next.scheduled_for!, this.deps.now())}.` : "";
+      await messenger.send(chatId, `🎠 ${PUBLISH_DAY[0].toUpperCase()}${PUBLISH_DAY.slice(1)}, ${PUBLISH_TIME}: não havia carrossel agendado para hoje, então nada foi publicado.${tail}`);
       return;
     }
 
@@ -915,7 +923,7 @@ Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · $
     }
   }
 
-  /** Quinta, 18h: lembra do carrossel se nenhum estiver aprovado. */
+  /** Véspera da publicação, 18h: lembra do carrossel se nenhum estiver aprovado. */
   async remindCarousel(): Promise<void> {
     const chatId = await this.ownerChat();
     if (chatId === null) return;
@@ -924,7 +932,7 @@ Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · $
     if (queue.some((q) => !q.scheduled_for || q.scheduled_for <= tomorrow)) return;
     await this.deps.messenger.send(
       chatId,
-      "📅 Amanhã às 18h sai o carrossel da semana, mas nenhum está aprovado ainda.\nQual o tema? Mande <code>/carrossel</code> e o tema.",
+      `📅 Amanhã às ${PUBLISH_TIME} sai o carrossel da semana, mas nenhum está aprovado ainda.\nQual o tema? Mande <code>/carrossel</code> e o tema.`,
     );
   }
 
@@ -1047,12 +1055,11 @@ Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · $
 
   // ---------- agendamentos ----------
 
-  /** Cron das 18h (Brasília): comentários todo dia, lembrete na quinta, carrossel na sexta, resumo no domingo. */
+  /** Cron das 18h (Brasília): comentários todo dia, lembrete na véspera do carrossel, resumo no domingo. */
   async runScheduled(): Promise<void> {
     const day = brWeekday(this.deps.now());
-    if (day === 5) await this.publishCarousel();
     await this.runDaily();
-    if (day === 4) await this.remindCarousel();
+    if (day === (PUBLISH_WEEKDAY + 6) % 7) await this.remindCarousel();
     if (day === 0) {
       const chatId = await this.ownerChat();
       if (chatId !== null) await this.sendWeek(chatId, true);

@@ -45,9 +45,41 @@ describe("texto do post", () => {
     expect(t).toContain("👉 What was the slowest endpoint");
   });
 
+  it("nas duas línguas: português primeiro, separador, inglês, fontes e hashtags uma vez só", () => {
+    const pt = {
+      titulo: "Sua API é lenta antes de rodar",
+      gancho: "Só 42% dos sites mobile têm um bom TTFB.",
+      pontos: ["Meça o TTFB primeiro", "Faça cache da consulta"],
+      conclusao: "Velocidade é decisão de produto.",
+      pergunta: "Qual foi o endpoint mais lento que você já arrumou?",
+    };
+    const t = buildCaption(parts(), pt);
+    expect(t.startsWith("🇧🇷 𝗦𝘂𝗮 𝗔𝗣𝗜")).toBe(true);
+    expect(t).toContain("→ Meça o TTFB primeiro\n→ Faça cache da consulta");
+    expect(t).toContain("\n\n— — —\n\n🇺🇸 𝗬𝗼𝘂𝗿 𝗔𝗣𝗜");
+    expect(t.indexOf("👉 Qual foi")).toBeLessThan(t.indexOf("👉 What was"));
+    expect(t).toContain("📊 Fontes em cada gráfico · Sources are cited under each chart.");
+    expect(t.match(/#backend/g)).toHaveLength(1);
+    expect(t.endsWith("#webperformance #backend #AIengineering")).toBe(true);
+  });
+
+  it("bilíngue longo demais: corta pontos das duas versões e mantém as perguntas", () => {
+    const long = Array.from({ length: 5 }, () => "x".repeat(400));
+    const t = buildCaption(parts({ pontos: long }), { titulo: "T", gancho: "G", pontos: long, conclusao: "C", pergunta: "Pergunta?" });
+    expect(t.length).toBeLessThanOrEqual(CAPTION_LIMIT);
+    expect(t).toContain("👉 Pergunta?");
+    expect(t).toContain("👉 What was the slowest endpoint");
+  });
+
+  it("sem a versão em português, fica só em inglês como antes", () => {
+    expect(buildCaption(parts())).toBe(buildCaption(parts(), undefined));
+    expect(buildCaption(parts())).not.toContain("🇺🇸");
+  });
+
   it("o pedido ao Claude descreve cada parte", () => {
     const sys = carouselSystemPrompt(perfil);
     expect(sys).toContain('"titulo": a strong headline, max 60 characters');
     expect(sys).toContain('"gancho": 1 to 2 short sentences, max 160 characters');
+    expect(sys).toContain('"post_pt": the same post text in Brazilian Portuguese');
   });
 });

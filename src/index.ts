@@ -170,6 +170,10 @@ export default {
     if (controller.cron === CRONS.daily) {
       ctx.waitUntil(guarded(env, "A rodada das 18h", (bot) => bot.runScheduled()));
     }
+    // 11:30 UTC de terça = 8h30 em Brasília: carrossel da semana
+    if (controller.cron === CRONS.publish) {
+      ctx.waitUntil(guarded(env, "A publicação do carrossel", (bot) => bot.publishCarousel()));
+    }
     // 13:00 UTC de sábado = 10h em Brasília: vagas da semana
     if (controller.cron === CRONS.jobs) {
       ctx.waitUntil(
