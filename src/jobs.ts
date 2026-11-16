@@ -40,8 +40,13 @@ Search for two groups, ${JOBS_PER_REGION} or more candidates each (the code pick
 1. "br": jobs in Brazil (remote preferred, or hybrid in Santa Catarina) paying at least R$ ${BR_MIN_SALARY.toLocaleString("pt-BR")} per month (CLT or PJ). Prefer listings that state the salary.
 2. "intl": remote jobs at companies outside Brazil that hire people living in Brazil or LATAM (contractor or employer of record).
 
+How to search (use several of these, in English and Portuguese):
+- LinkedIn Jobs: e.g. "site:linkedin.com/jobs/view desenvolvedor full stack React remoto", "site:linkedin.com/jobs/view frontend engineer React remote LATAM".
+- Company applicant tracking systems: e.g. "site:boards.greenhouse.io React remote Brazil", "site:jobs.lever.co frontend LATAM", "site:jobs.ashbyhq.com full stack remote Brazil", "site:apply.workable.com React Brasil".
+- Brazilian company career pages: e.g. "vaga desenvolvedor React pleno remoto trabalhe conosco".
+
 Rules:
-- Only real listings that are still open (accepting applications), posted in the last 21 days; prefer the last 7 days, when fewer people have applied.
+- Only real listings that are still open (accepting applications), posted in the last 30 days; prefer the last 7 days, when fewer people have applied.
 - Only where the application goes straight to the company: the company's own careers page (including its applicant tracking system, e.g. Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Teamtailor) or LinkedIn Jobs.
 - Exclude: Gupy, Catho, InfoJobs, Vagas.com, Indeed, Glassdoor, Programathor, Revelo, Trampos, Remotive, We Work Remotely, Himalayas, Wellfound and other job aggregators; jobs shared in WhatsApp/Telegram/Facebook/Discord groups; social media posts; "banco de talentos"; internships; junior roles; roles that clearly do not fit the stack.
 - Prefer roles where the CV is a strong match (most required skills present), so the candidate has a real chance of getting an interview.
@@ -64,31 +69,59 @@ function host(url: string): string | null {
 }
 
 /**
+ * Domínio da empresa/plataforma, sem subdomínio: br.linkedin.com → linkedin.com,
+ * job-boards.greenhouse.io → greenhouse.io, careers.acme.com.br → acme.com.br.
+ * A busca e o modelo nem sempre usam o mesmo subdomínio para a mesma página.
+ */
+export function baseDomain(h: string): string {
+  const parts = h.split(".");
+  const n = /\.(com|net|org|gov|edu|co)\.[a-z]{2}$/.test(h) ? 3 : 2;
+  return parts.slice(-n).join(".");
+}
+
+/** Quantas sugestões caíram em cada filtro (para explicar quando não sobra nenhuma). */
+export interface JobRejects {
+  plataforma: number;
+  fora_da_busca: number;
+  ja_enviada: number;
+  incompleta: number;
+}
+
+/**
  * Até 5 vagas por região: só links de sites que apareceram na busca e que levam direto à
  * empresa (sem Gupy, agregadores, grupos ou redes), sem repetir as já enviadas; primeiro as
  * que informam salário dentro do mínimo, depois as de maior aderência ao currículo.
  */
-export function selectJobs(items: JobPosting[], seen: Set<string>, sent: string[], key: (url: string) => string | null): JobPosting[] {
-  const seenHosts = new Set([...seen].map((k) => k.split("/")[0]));
+export function selectJobs(
+  items: JobPosting[],
+  seen: Set<string>,
+  sent: string[],
+  key: (url: string) => string | null,
+  rejects: JobRejects = { plataforma: 0, fora_da_busca: 0, ja_enviada: 0, incompleta: 0 },
+): JobPosting[] {
+  const seenDomains = new Set([...seen].map((k) => baseDomain(k.split("/")[0])));
   const sentSet = new Set(sent);
   const ok: JobPosting[] = [];
   for (const it of items) {
     const h = it?.url ? host(it.url) : null;
     const k = it?.url ? key(it.url) : null;
-    if (!h || !k || !isDirectListing(it.url) || !seenHosts.has(h) || sentSet.has(k)) continue;
-    if (!it.titulo?.trim() || !it.empresa?.trim()) continue;
-    if (ok.some((o) => key(o.url) === k || (o.titulo === it.titulo && o.empresa === it.empresa))) continue;
-    ok.push({
-      titulo: it.titulo.trim(),
-      empresa: it.empresa.trim(),
-      regiao: it.regiao === "intl" ? "intl" : "br",
-      local: (it.local ?? "").trim(),
-      salario: (it.salario ?? "").trim() || "não informado",
-      salario_ok: Boolean(it.salario_ok),
-      aderencia: Math.max(0, Math.min(100, Math.round(Number(it.aderencia) || 0))),
-      motivo: (it.motivo ?? "").trim(),
-      url: it.url,
-    });
+    if (!h || !k || !it.titulo?.trim() || !it.empresa?.trim()) rejects.incompleta++;
+    else if (!isDirectListing(it.url)) rejects.plataforma++;
+    else if (!seenDomains.has(baseDomain(h))) rejects.fora_da_busca++;
+    else if (sentSet.has(k)) rejects.ja_enviada++;
+    else if (!ok.some((o) => key(o.url) === k || (o.titulo === it.titulo && o.empresa === it.empresa))) {
+      ok.push({
+        titulo: it.titulo.trim(),
+        empresa: it.empresa.trim(),
+        regiao: it.regiao === "intl" ? "intl" : "br",
+        local: (it.local ?? "").trim(),
+        salario: (it.salario ?? "").trim() || "não informado",
+        salario_ok: Boolean(it.salario_ok),
+        aderencia: Math.max(0, Math.min(100, Math.round(Number(it.aderencia) || 0))),
+        motivo: (it.motivo ?? "").trim(),
+        url: it.url,
+      });
+    }
   }
   const pick = (regiao: JobPosting["regiao"]) =>
     ok

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Bot } from "../src/bot";
 import { urlKey } from "../src/claude";
-import { isDirectListing, jobsPrompt, selectJobs } from "../src/jobs";
+import { baseDomain, isDirectListing, jobsPrompt, selectJobs, type JobRejects } from "../src/jobs";
+import { rejectsLine } from "../src/bot";
 import { perfil } from "../src/perfil";
 import { job, makeDeps, msg } from "./fakes";
 
@@ -63,6 +64,41 @@ describe("selectJobs", () => {
     expect(isDirectListing("https://empresa.gupy.io/jobs/1")).toBe(false);
   });
 
+  it("aceita o mesmo site com outro subdomínio (br.linkedin.com, job-boards.greenhouse.io)", () => {
+    const seen = new Set(["br.linkedin.com/jobs/view/1", "job-boards.greenhouse.io/acme/jobs/2"]);
+    const out = selectJobs(
+      [
+        job({ titulo: "LinkedIn www", url: "https://www.linkedin.com/jobs/view/1" }),
+        job({ titulo: "Greenhouse", regiao: "intl", url: "https://boards.greenhouse.io/acme/jobs/2" }),
+      ],
+      seen,
+      [],
+      urlKey,
+    );
+    expect(out.map((j) => j.titulo)).toEqual(["LinkedIn www", "Greenhouse"]);
+    expect(baseDomain("careers.acme.com.br")).toBe("acme.com.br");
+    expect(baseDomain("br.linkedin.com")).toBe("linkedin.com");
+  });
+
+  it("conta por que cada sugestão caiu", () => {
+    const r: JobRejects = { plataforma: 0, fora_da_busca: 0, ja_enviada: 0, incompleta: 0 };
+    selectJobs(
+      [
+        job({ url: "https://acme.gupy.io/jobs/1" }),
+        job({ url: "https://inventada.example/vaga" }),
+        job({ url: "https://www.linkedin.com/jobs/view/10old" }),
+        job({ empresa: "", url: "https://www.linkedin.com/jobs/view/5" }),
+      ],
+      SEEN,
+      ["linkedin.com/jobs/view/10old"],
+      urlKey,
+      r,
+    );
+    expect(r).toEqual({ plataforma: 1, fora_da_busca: 1, ja_enviada: 1, incompleta: 1 });
+    expect(rejectsLine(4, 12, r)).toBe("O Claude sugeriu 4, mas nenhuma passou nos filtros: 1 em Gupy/agregadores, 1 com link que não apareceu na busca, 1 já enviadas antes, 1 sem link, título ou empresa.");
+    expect(rejectsLine(0, 12, r)).toBe("O Claude não devolveu nenhuma vaga (a busca trouxe 12 links).");
+  });
+
   it("entre as com salário dentro do mínimo, maior aderência ao currículo primeiro", () => {
     const seen = new Set(["linkedin.com/jobs/view/1"]);
     const out = selectJobs(
@@ -88,6 +124,8 @@ describe("selectJobs", () => {
     expect(p).toContain("Exclude: Gupy");
     expect(p).toContain("still open");
     expect(p).toContain("linkedin.com/jobs/view/10old");
+    expect(p).toContain("site:linkedin.com/jobs/view");
+    expect(p).toContain("site:boards.greenhouse.io");
   });
 });
 
@@ -133,5 +171,15 @@ describe("/vagas", () => {
     await ctx.bot.handleUpdate(msg("/vagas"));
     expect(ctx.store.jobs.map((j) => j.job.kind)).toEqual(["jobs"]);
     expect(ctx.drafter.jobCalls).toHaveLength(0);
+  });
+});
+
+describe("perfil dos comentários", () => {
+  it("o resumo é de engenheiro full stack e proíbe falar de consultórios e clientes", async () => {
+    const { systemPrompt } = await import("../src/claude");
+    const p = systemPrompt(perfil);
+    expect(p).toContain("Engenheiro de Software Full Stack");
+    expect(p).not.toMatch(/sites rápidos|\(saúde, consultórios/);
+    expect(p).toContain("Nunca falar de clientes, consultórios");
   });
 });

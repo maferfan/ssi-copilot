@@ -404,7 +404,7 @@ export class ClaudeDrafter implements Drafter {
     let input = 0;
     let output = 0;
     let searches = 0;
-    for (let turn = 0; turn < 4; turn++) {
+    for (let turn = 0; turn < 6; turn++) {
       const response = await this.client.beta.messages.create({
         model: MODEL,
         max_tokens: 16000,
@@ -436,7 +436,7 @@ export class ClaudeDrafter implements Drafter {
   }
 
   async findJobs(exclude: string[]): Promise<{ items: JobPosting[]; custo: CarouselCost; links: Set<string> }> {
-    const r = await this.searchAndAnswer(jobsPrompt(this.perfil, new Date(), exclude), 10, "A busca de vagas");
+    const r = await this.searchAndAnswer(jobsPrompt(this.perfil, new Date(), exclude), 15, "A busca de vagas");
     const items = parseJsonArray<JobPosting>(r.text);
     console.log("vagas", { sugeridas: items.length, links: r.seen.size, buscas: r.searches, inicio: r.text.slice(0, 120) });
     return { items, custo: costOf(r), links: r.seen };

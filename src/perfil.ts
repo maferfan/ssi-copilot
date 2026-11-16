@@ -5,9 +5,9 @@
 export const perfil = {
   nome: "Matheus Ferrazza",
   resumo:
-    "Desenvolvedor web. Cria sites rápidos e bem desenhados para profissionais " +
-    "(saúde, consultórios, serviços) e quer crescer na carreira de tecnologia.",
-  objetivo: "Ser lembrado por recrutadores e clientes como um dev que entende de produto e entrega.",
+    "Engenheiro de Software Full Stack (pleno), cerca de 3 anos de experiência remota com React, " +
+    "Next.js, TypeScript e Node.js: performance de front-end, design system e uso de IA no desenvolvimento.",
+  objetivo: "Ser lembrado por recrutadores e tech leads como um dev que entende de produto e entrega, e ser chamado para entrevistas.",
   tom: [
     "Direto e humano, como alguém da área conversando, não como um robô elogiando.",
     "Acrescenta algo: uma experiência prática, um contraponto ou um detalhe técnico.",
@@ -17,7 +17,8 @@ export const perfil = {
     "Entre 2 e 4 frases. Nunca mais que 450 caracteres.",
     "Nada de 'Ótimo post!', 'Concordo totalmente' ou elogio vazio.",
     "Sem hashtags, sem links, no máximo um emoji (de preferência nenhum).",
-    "Não inventar números, empresas ou experiências que o post não sustenta: se citar vivência, que seja genérica e plausível para um dev web.",
+    "Não inventar números, empresas ou experiências que o post não sustenta: se citar vivência, que seja genérica e plausível para um engenheiro full stack (front-end com React/Next, APIs em Node, performance, design system, times de produto).",
+    "Nunca falar de clientes, consultórios, clínicas, área da saúde ou de vender serviço: o assunto é carreira e engenharia de software.",
     "Escrever no mesmo idioma do post: post em inglês recebe comentário em inglês; em português, português do Brasil.",
   ],
   /** Exemplos de comentários seus. Quanto mais, melhor o tom. */
