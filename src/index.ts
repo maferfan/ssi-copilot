@@ -67,6 +67,7 @@ function page(title: string, text: string, status = 200) {
 const JOB_LABEL: Record<string, string> = {
   daily: "Gerar as sugestões de comentário",
   carousel: "Montar o carrossel",
+  post: "Montar o post de imagem",
   topics: "A busca de temas",
   jobs: "A busca de vagas",
   image: "Trocar a imagem do carrossel",
@@ -170,9 +171,9 @@ export default {
     if (controller.cron === CRONS.daily) {
       ctx.waitUntil(guarded(env, "A rodada das 18h", (bot) => bot.runScheduled()));
     }
-    // 11:30 UTC de terça = 8h30 em Brasília: carrossel da semana
+    // 11:30 UTC de terça e quinta = 8h30 em Brasília: post de imagem (terça) e carrossel (quinta)
     if (controller.cron === CRONS.publish) {
-      ctx.waitUntil(guarded(env, "A publicação do carrossel", (bot) => bot.publishCarousel()));
+      ctx.waitUntil(guarded(env, "A publicação da semana", (bot) => bot.publishCarousel()));
     }
     // 13:00 UTC de sábado = 10h em Brasília: vagas da semana
     if (controller.cron === CRONS.jobs) {

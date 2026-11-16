@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Perfil } from "./perfil";
 import { buildCaption, type PostParts, type PostTextParts } from "./caption";
 import { normalizeCarousel } from "./carousel";
+import { IMAGE_POST_SCHEMA, imagePostSystemPrompt, imagePostUserPrompt, normalizeImagePost } from "./imagepost";
 import { jobsPrompt } from "./jobs";
 import { detectLanguage } from "./language";
 import { NotAPostError, type CarouselChart, type CarouselContent, type CarouselCost, type Drafter, type JobPosting, type Post, type TopicIdea } from "./types";
@@ -503,4 +504,46 @@ export class ClaudeDrafter implements Drafter {
     return normalizeCarousel({ ...rest, legenda, capa_grafico: cover, slides, custo });
   }
 
+
+  /** Post de imagem única: sem pesquisa (não cita números); o Claude escolhe passo a passo ou errado × certo. */
+  async draftImagePost(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent> {
+    const response = await this.client.beta.messages.create({
+      model: MODEL,
+      max_tokens: 16000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      output_config: { effort: "high", format: { type: "json_schema", schema: IMAGE_POST_SCHEMA } },
+      system: imagePostSystemPrompt(this.perfil),
+      messages: [{ role: "user", content: imagePostUserPrompt(topic, previous, instructions) }],
+    });
+    if (response.stop_reason === "refusal") throw new Error("O Claude não quis escrever sobre esse tema.");
+    if (response.stop_reason === "max_tokens") throw new Error("O post ficou longo demais. Tente um tema mais específico.");
+    const json = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+    const d = JSON.parse(json) as {
+      layout: string;
+      titulo: string;
+      subtitulo: string;
+      passos: { titulo: string; texto: string }[];
+      ruim: { titulo: string; itens: string[] };
+      bom: { titulo: string; itens: string[] };
+      imagem_prompt: string;
+      post: PostParts;
+      post_pt: PostTextParts;
+    };
+    if (!d.titulo?.trim()) throw new Error("O post veio sem título. Tente de novo.");
+    return {
+      titulo: d.titulo.trim(),
+      subtitulo: (d.subtitulo ?? "").trim(),
+      ...(d.imagem_prompt?.trim() ? { imagem_prompt: d.imagem_prompt.trim() } : {}),
+      imagem: normalizeImagePost(d),
+      slides: [],
+      fechamento: { titulo: "", texto: "" },
+      legenda: buildCaption(d.post, d.post_pt),
+      custo: costOf({
+        input: response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0),
+        output: response.usage.output_tokens,
+        searches: 0,
+      }),
+    };
+  }
 }

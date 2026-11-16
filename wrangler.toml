@@ -4,11 +4,11 @@ compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 
 # 21:00 UTC = 18:00 em Brasília: comentários todo dia, lembrete na véspera do carrossel, resumo no domingo
-# 11:30 UTC de terça = 8h30 em Brasília: publica o carrossel da semana
+# 11:30 UTC de terça e quinta = 8h30 em Brasília: post de imagem na terça, carrossel na quinta
 # 13:00 UTC de sábado = 10h em Brasília: vagas da semana
 # A cada minuto: fila de trabalhos longos pedidos pelo Telegram (carrossel, /agora)
 [triggers]
-crons = ["0 21 * * *", "30 11 * * TUE", "0 13 * * SAT", "* * * * *"]  # iguais a src/crons.ts
+crons = ["0 21 * * *", "30 11 * * TUE,THU", "0 13 * * SAT", "* * * * *"]  # iguais a src/crons.ts
 
 [[d1_databases]]
 binding = "DB"

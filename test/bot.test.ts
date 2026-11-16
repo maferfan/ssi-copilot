@@ -2,11 +2,12 @@ import { NotAPostError } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { Bot, DAILY_LIMIT, nextPublishLabel, parseMetrics } from "../src/bot";
 import { perfil } from "../src/perfil";
-import { click, makeDeps, msg, OWNER, sampleCarousel } from "./fakes";
+import { click, makeDeps, msg, OWNER, sampleCarousel, samplePost } from "./fakes";
 
 const URL = "https://www.linkedin.com/posts/fulana_entrevistas-activity-1";
 const LONG_TEXT = "Os 5 erros mais comuns em entrevistas técnicas e como evitar cada um deles.";
 
+const THU = { now: () => new Date("2026-11-12T10:00:00Z") }; // quinta, 12/11, 7h em Brasília (antes das 8h30)
 const TUE = { now: () => new Date("2026-11-10T10:00:00Z") }; // terça, 10/11, 7h em Brasília (antes das 8h30)
 
 async function setup(over: Parameters<typeof makeDeps>[0] = {}) {
@@ -281,12 +282,12 @@ describe("/conectar", () => {
 
 describe("carrossel", () => {
   it("/carrossel <tema> gera, manda a prévia em imagens e os botões", async () => {
-    const { bot, messenger, drafter, store } = await setup(TUE);
+    const { bot, messenger, drafter, store } = await setup(THU);
     await bot.handleUpdate(msg("/carrossel como escolher a stack"));
     expect(drafter.carouselCalls[0].topic).toBe("como escolher a stack");
     expect(messenger.photos).toHaveLength(1);
     const card = messenger.lastCard()!;
-    expect(card.html).toContain("hoje (terça) às 8h30");
+    expect(card.html).toContain("hoje (quinta) às 8h30");
     expect(card.buttons?.[0][0].data).toBe("ca:1");
     expect(store.carousels[0].status).toBe("draft");
   });
@@ -298,32 +299,32 @@ describe("carrossel", () => {
     expect(drafter.carouselCalls[0].topic).toBe("performance web");
   });
 
-  it("aprovar agenda na próxima terça livre; o seguinte vai para a terça depois", async () => {
-    const { bot, store, messenger } = await setup(TUE);
+  it("aprovar agenda na próxima quinta livre; o seguinte vai para a quinta depois", async () => {
+    const { bot, store, messenger } = await setup(THU);
     await bot.handleUpdate(msg("/carrossel tema A"));
     await bot.handleUpdate(click("ca:1"));
-    expect(store.carousels[0]).toMatchObject({ status: "approved", scheduled_for: "2026-11-10" });
-    expect(messenger.edits.at(-1)?.html).toContain("Agendado: hoje (terça) às 8h30");
+    expect(store.carousels[0]).toMatchObject({ status: "approved", scheduled_for: "2026-11-12" });
+    expect(messenger.edits.at(-1)?.html).toContain("Agendado: hoje (quinta) às 8h30");
 
     await bot.handleUpdate(msg("/carrossel tema B"));
-    expect(messenger.lastCard()!.html).toContain("Aprovando, ele é publicado terça, 17/11, às 8h30.");
+    expect(messenger.lastCard()!.html).toContain("Aprovando, ele é publicado quinta, 19/11, às 8h30.");
     await bot.handleUpdate(click("ca:2"));
     await bot.handleUpdate(msg("/carrossel tema C"));
     await bot.handleUpdate(click("ca:3"));
     expect(store.carousels.map((c) => [c.status, c.scheduled_for])).toEqual([
-      ["approved", "2026-11-10"],
-      ["approved", "2026-11-17"],
-      ["approved", "2026-11-24"],
+      ["approved", "2026-11-12"],
+      ["approved", "2026-11-19"],
+      ["approved", "2026-11-26"],
     ]);
     expect(messenger.edits.at(-1)?.html).toContain("Já há 2 carrosséis na fila antes dele");
 
     await bot.handleUpdate(msg("/agenda"));
-    expect(messenger.last().html).toContain("hoje (terça) às 8h30 — Versão 1");
-    expect(messenger.last().html).toContain("terça, 24/11, às 8h30 — Versão 3");
+    expect(messenger.last().html).toContain("hoje (quinta) às 8h30 — 🎠 Versão 1");
+    expect(messenger.last().html).toContain("quinta, 26/11, às 8h30 — 🎠 Versão 3");
   });
 
-  it("descartar um agendado libera a terça dele para o próximo", async () => {
-    const { bot, store } = await setup(TUE);
+  it("descartar um agendado libera a quinta dele para o próximo", async () => {
+    const { bot, store } = await setup(THU);
     await bot.handleUpdate(msg("/carrossel tema A"));
     await bot.handleUpdate(click("ca:1"));
     await bot.handleUpdate(msg("/carrossel tema B"));
@@ -331,7 +332,7 @@ describe("carrossel", () => {
     await bot.handleUpdate(click("cx:1"));
     await bot.handleUpdate(msg("/carrossel tema C"));
     await bot.handleUpdate(click("ca:3"));
-    expect(store.carousels[2].scheduled_for).toBe("2026-11-10");
+    expect(store.carousels[2].scheduled_for).toBe("2026-11-12");
   });
 
   it("ajustar manda a versão atual e o pedido para o Claude", async () => {
@@ -353,8 +354,8 @@ describe("carrossel", () => {
     expect(store.carousels.map((c) => c.status)).toEqual(["discarded", "draft"]);
   });
 
-  it("terça publica o aprovado e registra a ação", async () => {
-    const { bot, store, linkedin, messenger } = await setup(TUE);
+  it("quinta publica o aprovado e registra a ação", async () => {
+    const { bot, store, linkedin, messenger } = await setup(THU);
     await bot.handleUpdate(msg("/carrossel tema A"));
     await bot.handleUpdate(click("ca:1"));
     await bot.publishCarousel();
@@ -365,7 +366,7 @@ describe("carrossel", () => {
   });
 
   it("se a publicação falhar, manda o PDF e a legenda para postar à mão", async () => {
-    const ctx = await setup(TUE);
+    const ctx = await setup(THU);
     await ctx.bot.handleUpdate(msg("/carrossel tema A"));
     await ctx.bot.handleUpdate(click("ca:1"));
     ctx.linkedin.failPublish = new Error("HTTP 403");
@@ -393,8 +394,8 @@ describe("agenda da publicação", () => {
     return { ...ctx, bot };
   }
 
-  it("terça publica só o carrossel da vez; os outros esperam a terça deles", async () => {
-    let now = new Date("2026-11-10T10:00:00Z"); // terça, 7h
+  it("quinta publica só o carrossel da vez; os outros esperam a quinta deles", async () => {
+    let now = new Date("2026-11-12T10:00:00Z"); // quinta, 7h
     const ctx = makeDeps({ now: () => now });
     const bot = new Bot(ctx.deps, perfil);
     await bot.handleUpdate(msg("/start"));
@@ -402,39 +403,43 @@ describe("agenda da publicação", () => {
       await bot.handleUpdate(msg(`/carrossel tema ${t}`));
       await bot.handleUpdate(click(`ca:${i + 1}`));
     }
-    now = new Date("2026-11-10T11:30:00Z");
+    now = new Date("2026-11-12T11:30:00Z");
     await bot.publishCarousel();
     expect(ctx.linkedin.published.map((p) => p.title)).toEqual(["Versão 1"]);
     expect(ctx.store.carousels[1].status).toBe("approved");
 
-    now = new Date("2026-11-17T11:30:00Z");
+    now = new Date("2026-11-19T11:30:00Z");
     await bot.publishCarousel();
     expect(ctx.linkedin.published.map((p) => p.title)).toEqual(["Versão 1", "Versão 2"]);
   });
 
-  it("terça sem carrossel da vez avisa quando sai o próximo", async () => {
-    let now = new Date("2026-11-10T12:00:00Z"); // terça, depois das 8h30
+  it("quinta sem carrossel da vez avisa quando sai o próximo", async () => {
+    let now = new Date("2026-11-12T12:00:00Z"); // quinta, depois das 8h30
     const ctx = makeDeps({ now: () => now });
     const bot = new Bot(ctx.deps, perfil);
     await bot.handleUpdate(msg("/start"));
     await bot.handleUpdate(msg("/carrossel tema A"));
-    await bot.handleUpdate(click("ca:1")); // vai para 17/11
-    now = new Date("2026-11-10T11:30:00Z");
+    await bot.handleUpdate(click("ca:1")); // vai para 19/11
+    now = new Date("2026-11-12T11:30:00Z");
     await bot.publishCarousel();
     expect(ctx.linkedin.published).toHaveLength(0);
-    expect(ctx.messenger.last().html).toContain("Terça, 8h30: não havia carrossel agendado para hoje");
-    expect(ctx.messenger.last().html).toContain("O próximo sai terça, 17/11, às 8h30.");
+    expect(ctx.messenger.last().html).toContain("Quinta, 8h30: não havia carrossel agendado para hoje");
+    expect(ctx.messenger.last().html).toContain("O próximo sai quinta, 19/11, às 8h30.");
   });
 
-  it("segunda (véspera) lembra do carrossel quando não há nenhum aprovado", async () => {
-    const ctx = await at("2026-11-09T21:00:00Z");
-    await ctx.bot.runScheduled();
-    expect(ctx.messenger.sent.some((s) => s.html.includes("Amanhã às 8h30"))).toBe(true);
-    expect(ctx.linkedin.published).toHaveLength(0);
+  it("segunda lembra do post de imagem e quarta do carrossel, quando não há nenhum aprovado", async () => {
+    const mon = await at("2026-11-09T21:00:00Z");
+    await mon.bot.runScheduled();
+    expect(mon.messenger.sent.some((s) => s.html.includes("Amanhã às 8h30 sai o post de imagem"))).toBe(true);
+    expect(mon.messenger.sent.some((s) => s.html.includes("sai o carrossel"))).toBe(false);
+    const wed = await at("2026-11-11T21:00:00Z");
+    await wed.bot.runScheduled();
+    expect(wed.messenger.sent.some((s) => s.html.includes("Amanhã às 8h30 sai o carrossel"))).toBe(true);
+    expect(wed.linkedin.published).toHaveLength(0);
   });
 
   it("a rodada das 18h não publica carrossel nem lembra fora da véspera", async () => {
-    const ctx = await at("2026-11-10T09:00:00Z");
+    const ctx = await at("2026-11-12T09:00:00Z");
     await ctx.bot.handleUpdate(msg("/carrossel tema A"));
     await ctx.bot.handleUpdate(click("ca:1"));
     await ctx.bot.runScheduled();
@@ -444,11 +449,102 @@ describe("agenda da publicação", () => {
 });
 
 describe("nextPublishLabel", () => {
-  it("terça antes das 8h30 é hoje; depois, a próxima terça", () => {
-    expect(nextPublishLabel(new Date("2026-11-10T11:29:00Z"))).toBe("hoje (terça) às 8h30");
-    expect(nextPublishLabel(new Date("2026-11-10T11:30:00Z"))).toBe("terça, 17/11, às 8h30");
-    expect(nextPublishLabel(new Date("2026-11-06T14:00:00Z"))).toBe("terça, 10/11, às 8h30");
-    expect(nextPublishLabel(new Date("2026-11-06T14:00:00Z"), ["2026-11-10", "2026-11-17"])).toBe("terça, 24/11, às 8h30");
+  it("quinta antes das 8h30 é hoje; depois, a próxima quinta", () => {
+    expect(nextPublishLabel(new Date("2026-11-12T11:29:00Z"))).toBe("hoje (quinta) às 8h30");
+    expect(nextPublishLabel(new Date("2026-11-12T11:30:00Z"))).toBe("quinta, 19/11, às 8h30");
+    expect(nextPublishLabel(new Date("2026-11-10T14:00:00Z"))).toBe("quinta, 12/11, às 8h30");
+    expect(nextPublishLabel(new Date("2026-11-10T14:00:00Z"), ["2026-11-12", "2026-11-19"])).toBe("quinta, 26/11, às 8h30");
+  });
+});
+
+describe("post de imagem (terça)", () => {
+  it("/post <tema> gera a imagem, manda a prévia e o cartão com o passo a passo", async () => {
+    const { bot, messenger, drafter, store, renderer } = await setup(TUE);
+    await bot.handleUpdate(msg("/post boas práticas de micro-interações"));
+    expect(drafter.postCalls[0].topic).toBe("boas práticas de micro-interações");
+    expect(drafter.carouselCalls).toHaveLength(0);
+    expect(renderer.calls).toBe(1);
+    expect(messenger.photos).toEqual([[new Uint8Array([9])]]);
+    const card = messenger.lastCard()!;
+    expect(card.html).toContain("📌 <b>Post de imagem</b>");
+    expect(card.html).toContain("🪜 <b>Passo a passo</b>\n1. Function first — <i>Every animation answers a user action.</i>");
+    expect(card.html).toContain("Aprovando, ele é publicado hoje (terça) às 8h30.");
+    expect(store.carousels[0].content.imagem?.layout).toBe("steps");
+  });
+
+  it("sem tema, pergunta; o modelo errado × certo aparece no cartão", async () => {
+    const { bot, messenger, drafter } = await setup(TUE);
+    drafter.draftImagePost = async () => ({
+      ...samplePost("Onboarding **that works**"),
+      imagem: { layout: "compare", passos: [], ruim: { titulo: "Avoid", itens: ["Wall of text", "No progress"] }, bom: { titulo: "Do", itens: ["Icons + text", "Progress bar"] } },
+    });
+    await bot.handleUpdate(msg("/post"));
+    expect(messenger.last().html).toContain("Qual o tema do post de imagem?");
+    await bot.handleUpdate(msg("onboarding"));
+    const card = messenger.lastCard()!.html;
+    expect(card).toContain("⚖️ <b>Errado × certo</b>\n❌ <b>Avoid</b>\n• Wall of text");
+    expect(card).toContain("✅ <b>Do</b>\n• Icons + text");
+  });
+
+  it("post e carrossel têm filas separadas: post na terça, carrossel na quinta", async () => {
+    const { bot, store, messenger } = await setup(TUE);
+    await bot.handleUpdate(msg("/post tema P"));
+    await bot.handleUpdate(click("ca:1"));
+    await bot.handleUpdate(msg("/carrossel tema C"));
+    await bot.handleUpdate(click("ca:2"));
+    await bot.handleUpdate(msg("/post tema P2"));
+    await bot.handleUpdate(click("ca:3"));
+    expect(store.carousels.map((c) => c.scheduled_for)).toEqual(["2026-11-10", "2026-11-12", "2026-11-17"]);
+    expect(messenger.edits.at(-1)?.html).toContain("Já há 1 post na fila antes dele");
+    await bot.handleUpdate(msg("/agenda"));
+    const agenda = messenger.last().html;
+    expect(agenda).toContain("• hoje (terça) às 8h30 — 📌 Post 1");
+    expect(agenda).toContain("• quinta, 12/11, às 8h30 — 🎠 Versão 1");
+    expect(agenda).toContain("• terça, 17/11, às 8h30 — 📌 Post 2");
+  });
+
+  it("na terça publica só o post (imagem única); o carrossel espera a quinta", async () => {
+    let now = new Date("2026-11-10T10:00:00Z");
+    const ctx = makeDeps({ now: () => now });
+    const bot = new Bot(ctx.deps, perfil);
+    await bot.handleUpdate(msg("/start"));
+    await bot.handleUpdate(msg("/post tema P"));
+    await bot.handleUpdate(click("ca:1"));
+    await bot.handleUpdate(msg("/carrossel tema C"));
+    await bot.handleUpdate(click("ca:2"));
+
+    now = new Date("2026-11-10T11:30:00Z"); // terça, 8h30
+    await bot.publishCarousel();
+    expect(ctx.linkedin.images).toEqual([{ altText: "Post 1", caption: "Legenda do post de imagem" }]);
+    expect(ctx.linkedin.published).toHaveLength(0);
+    expect(ctx.store.carousels.map((c) => c.status)).toEqual(["published", "approved"]);
+    expect(ctx.messenger.last().html).toContain("🚀 <b>Post publicado!</b>");
+
+    now = new Date("2026-11-12T11:30:00Z"); // quinta, 8h30
+    await bot.publishCarousel();
+    expect(ctx.linkedin.published.map((p) => p.title)).toEqual(["Versão 1"]);
+  });
+
+  it("se a publicação do post falhar, manda a imagem e a legenda para postar à mão", async () => {
+    const ctx = await setup(TUE);
+    await ctx.bot.handleUpdate(msg("/post tema P"));
+    await ctx.bot.handleUpdate(click("ca:1"));
+    ctx.linkedin.failPublish = new Error("HTTP 403");
+    await ctx.bot.publishCarousel();
+    expect(ctx.store.carousels[0].status).toBe("failed");
+    expect(ctx.messenger.photos.at(-1)).toEqual([new Uint8Array([9])]);
+    expect(ctx.messenger.documents).toHaveLength(0);
+    expect(ctx.messenger.last().html).toContain("Legenda do post de imagem");
+  });
+
+  it("refazer e ajustar continuam sendo post de imagem", async () => {
+    const { bot, drafter } = await setup(TUE);
+    await bot.handleUpdate(msg("/post tema P"));
+    await bot.handleUpdate(click("cr:1"));
+    await bot.handleUpdate(click("cj:2"));
+    await bot.handleUpdate(msg("use o modelo errado × certo"));
+    expect(drafter.postCalls.map((c) => c.instructions)).toEqual([undefined, undefined, "use o modelo errado × certo"]);
+    expect(drafter.carouselCalls).toHaveLength(0);
   });
 });
 
@@ -519,7 +615,7 @@ describe("métricas da semana", () => {
   });
 
   it("carrossel publicado guarda o link do post", async () => {
-    const { bot, store } = await setup(TUE);
+    const { bot, store } = await setup(THU);
     await bot.handleUpdate(msg("/carrossel tema A"));
     await bot.handleUpdate(click("ca:1"));
     await bot.publishCarousel();
@@ -529,7 +625,7 @@ describe("métricas da semana", () => {
 
 describe("título do documento no LinkedIn", () => {
   it("sai sem os asteriscos de destaque", async () => {
-    const ctx = makeDeps(TUE);
+    const ctx = makeDeps(THU);
     ctx.deps.drafter.draftCarousel = async () => sampleCarousel("Only **42%** of mobile sites have good TTFB");
     const bot = new Bot(ctx.deps, perfil);
     await bot.handleUpdate(msg("/start"));

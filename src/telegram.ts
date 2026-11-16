@@ -71,6 +71,14 @@ export class TelegramMessenger implements Messenger {
   }
 
   async sendPhotos(chatId: number, images: Uint8Array[]) {
+    // Álbum (sendMediaGroup) exige de 2 a 10 fotos; uma só vai por sendPhoto
+    if (images.length === 1) {
+      const one = new FormData();
+      one.set("chat_id", String(chatId));
+      one.set("photo", new Blob([images[0]], { type: "image/png" }), "post.png");
+      await this.upload("sendPhoto", one);
+      return;
+    }
     const form = new FormData();
     form.set("chat_id", String(chatId));
     form.set("media", JSON.stringify(images.slice(0, 10).map((_, i) => ({ type: "photo", media: `attach://slide${i}` }))));
@@ -102,7 +110,8 @@ export class TelegramMessenger implements Messenger {
     return this.call<boolean>("setMyCommands", {
       commands: [
         { command: "agora", description: "Gerar as sugestões de comentário agora" },
-        { command: "carrossel", description: "Criar um carrossel: /carrossel <tema>" },
+        { command: "post", description: "Post de imagem (terça): /post <tema>" },
+        { command: "carrossel", description: "Carrossel (quinta): /carrossel <tema>" },
         { command: "vagas", description: "Vagas da semana: 5 no Brasil e 5 no exterior" },
         { command: "temas", description: "Temas em alta (software, front-end, IA) para o carrossel" },
         { command: "agenda", description: "Carrosséis agendados, por data" },

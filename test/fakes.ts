@@ -158,6 +158,27 @@ export function sampleCarousel(titulo = "Como escolher a stack"): CarouselConten
   };
 }
 
+export function samplePost(titulo = "6 rules for **micro-interactions**"): CarouselContent {
+  return {
+    titulo,
+    subtitulo: "Small details users feel",
+    imagem_prompt: "a finger tapping a glowing button",
+    imagem: {
+      layout: "steps",
+      passos: [
+        { titulo: "Function first", texto: "Every animation answers a user action." },
+        { titulo: "Keep it subtle", texto: "Under 300 ms, no bounce." },
+        { titulo: "Instant feedback", texto: "Show the state change right away." },
+      ],
+      ruim: { titulo: "", itens: [] },
+      bom: { titulo: "", itens: [] },
+    },
+    slides: [],
+    fechamento: { titulo: "", texto: "" },
+    legenda: "Legenda do post de imagem",
+  };
+}
+
 export const job = (over: Partial<JobPosting> = {}): JobPosting => ({
   titulo: "Senior Frontend Engineer",
   empresa: "Acme",
@@ -204,12 +225,18 @@ export class FakeDrafter implements Drafter {
     this.carouselCalls.push({ topic, previous, instructions });
     return sampleCarousel(`Versão ${this.carouselCalls.length}`);
   }
+  postCalls: { topic: string; previous?: CarouselContent; instructions?: string }[] = [];
+  async draftImagePost(topic: string, previous?: CarouselContent, instructions?: string) {
+    this.postCalls.push({ topic, previous, instructions });
+    return samplePost(`Post ${this.postCalls.length}`);
+  }
 }
 
 export class FakeRenderer implements Renderer {
   calls = 0;
-  async render(): Promise<RenderedCarousel> {
+  async render(c: CarouselContent): Promise<RenderedCarousel> {
     this.calls++;
+    if (c.imagem) return { pdf: new Uint8Array(), images: [new Uint8Array([9])] };
     return { pdf: new Uint8Array([1]), images: [new Uint8Array([2]), new Uint8Array([3])] };
   }
 }
@@ -219,6 +246,7 @@ export class FakeLinkedIn implements LinkedIn {
   configured = true;
   comments: { urn: string; text: string }[] = [];
   published: { title: string; caption: string }[] = [];
+  images: { altText: string; caption: string }[] = [];
   failComment: Error | null = null;
   failPublish: Error | null = null;
 
@@ -231,6 +259,11 @@ export class FakeLinkedIn implements LinkedIn {
   async comment(urn: string, text: string) {
     if (this.failComment) throw this.failComment;
     this.comments.push({ urn, text });
+  }
+  async publishImage(_img: Uint8Array, altText: string, caption: string) {
+    if (this.failPublish) throw this.failPublish;
+    this.images.push({ altText, caption });
+    return "https://www.linkedin.com/feed/update/urn:li:share:2/";
   }
   async publishCarousel(_r: RenderedCarousel, title: string, caption: string) {
     if (this.failPublish) throw this.failPublish;
