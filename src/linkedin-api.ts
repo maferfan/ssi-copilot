@@ -214,6 +214,13 @@ export class LinkedInGateway implements LinkedIn {
     }
   }
 
+  /** Post de imagem única (o infográfico de terça). */
+  async publishImage(image: Uint8Array, altText: string, caption: string): Promise<string> {
+    const { token, person } = await this.auth();
+    const id = await this.upload(token, "images", person, image);
+    return await this.createPost(token, person, caption, { media: { id, altText } });
+  }
+
   /** O LinkedIn processa o PDF por alguns segundos antes de aceitar o post. */
   private async waitAvailable(token: string, document: string) {
     for (let i = 0; i < 10; i++) {

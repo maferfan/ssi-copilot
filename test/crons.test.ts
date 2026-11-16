@@ -13,3 +13,13 @@ describe("crons", () => {
     for (const cron of configured) expect(cron.split(" ")[4]).not.toBe("0");
   });
 });
+
+describe("publicação do carrossel", () => {
+  it("o cron de publicação é o mesmo dia e hora que o bot mostra (Brasília = UTC-3)", async () => {
+    const { PUBLISH_WEEKDAYS, PUBLISH_MINUTES } = await import("../src/bot");
+    const [min, hour, , , dow] = CRONS.publish.split(" ");
+    const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+    expect(dow.split(",").map((d) => days.indexOf(d)).sort()).toEqual(Object.values(PUBLISH_WEEKDAYS).sort());
+    expect((Number(hour) - 3) * 60 + Number(min)).toBe(PUBLISH_MINUTES);
+  });
+});

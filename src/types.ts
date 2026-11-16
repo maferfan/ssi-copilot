@@ -50,19 +50,32 @@ export interface CarouselContent {
   capa_grafico?: CarouselChart;
   /** Descrição (em inglês) da ilustração da capa, escrita pelo Claude. */
   imagem_prompt?: string;
-  /** Ilustração da capa gerada pelo Flux (data URL JPEG); fica guardada para a publicação de sexta. */
+  /** Ilustração da capa gerada pelo Flux (data URL JPEG); fica guardada para a publicação. */
   capa_imagem?: string;
   slides: { titulo: string; texto: string; grafico?: CarouselChart }[];
   fechamento: { titulo: string; texto: string };
   legenda: string;
+  /** Post de imagem única (terça): presente só nesse formato; aí `slides` fica vazio. */
+  imagem?: ImagePost;
   /** Fontes usadas nos gráficos, na ordem do slide de referências. */
   referencias?: Reference[];
   custo?: CarouselCost;
 }
 
+/** Infográfico de uma imagem: passo a passo ou errado × certo. */
+export interface ImagePost {
+  layout: "steps" | "compare";
+  passos: { titulo: string; texto: string }[];
+  ruim: { titulo: string; itens: string[] };
+  bom: { titulo: string; itens: string[] };
+}
+
+/** "carousel" sai na quinta; "post" (imagem única) na terça. */
+export type PostFormat = "carousel" | "post";
+
 export type CarouselStatus =
   | "draft" // prévia enviada, aguardando decisão
-  | "approved" // agendado para a próxima sexta, 18h
+  | "approved" // agendado (post na terça, carrossel na quinta, 8h30)
   | "published"
   | "failed" // a publicação automática falhou; o PDF foi enviado para postar à mão
   | "discarded";
@@ -75,7 +88,7 @@ export interface Carousel {
   created_at: string;
   published_at: string | null;
   post_url: string | null;
-  /** Sexta em que sai (AAAA-MM-DD, horário de Brasília); só para aprovados. */
+  /** Dia em que sai (AAAA-MM-DD, horário de Brasília); só para aprovados. */
   scheduled_for: string | null;
 }
 
@@ -91,6 +104,7 @@ export interface WeeklyMetrics {
 export type Job =
   | { kind: "daily" }
   | { kind: "carousel"; chatId: number; topic: string; previousId?: number; instructions?: string }
+  | { kind: "post"; chatId: number; topic: string; previousId?: number; instructions?: string }
   | { kind: "topics"; chatId: number }
   | { kind: "jobs"; chatId: number }
   /** Nova ilustração da capa; sem `scene`, usa a mesma ideia da anterior. */
@@ -103,6 +117,7 @@ export type Awaiting =
   | { type: "post_text"; postId: number }
   | { type: "edit"; postId: number }
   | { type: "carousel_topic" }
+  | { type: "post_topic" }
   | { type: "carousel_adjust"; carouselId: number }
   | { type: "metrics"; week: string }
   | { type: "invites" }
@@ -196,6 +211,8 @@ export interface Drafter {
   draftComment(post: Pick<Post, "url" | "author" | "text">, avoid: string[]): Promise<string>;
   /** Escreve um carrossel; com `previous` + `instructions`, ajusta uma versão anterior. */
   draftCarousel(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent>;
+  /** Post de imagem única (infográfico); com `previous` + `instructions`, ajusta. */
+  draftImagePost(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent>;
   /** Transforma a cena descrita pelo usuário (qualquer idioma) numa descrição em inglês para o Flux. */
   sceneToPrompt(scene: string): Promise<string>;
   /** Busca vagas abertas que combinam com o currículo (Brasil e exterior). */
@@ -225,6 +242,8 @@ export interface LinkedIn {
   comment(postUrn: string, text: string): Promise<void>;
   /** Publica no perfil e devolve o link do post. */
   publishCarousel(rendered: RenderedCarousel, title: string, caption: string): Promise<string>;
+  /** Post com uma imagem só; devolve o link do post. */
+  publishImage(image: Uint8Array, altText: string, caption: string): Promise<string>;
 }
 
 export interface Preview {
