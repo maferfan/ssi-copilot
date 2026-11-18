@@ -143,6 +143,10 @@ export interface Store {
   /** Pega os trabalhos pendentes e marca como "running" (cada um roda uma vez só). */
   takeJobs(limit: number): Promise<{ id: number; job: Job }[]>;
   finishJob(id: number, ok: boolean): Promise<void>;
+  /** Custo de uma chamada ao Claude (em US$), para o /custos e o teto mensal. */
+  addCost(kind: string, usd: number, createdAt: string): Promise<void>;
+  /** Total e quantidade de chamadas por tipo, a partir de `sinceIso`. */
+  costsSince(sinceIso: string): Promise<{ kind: string; usd: number; n: number }[]>;
   /** Quantos trabalhos há em cada estado (pending, running, done, failed). */
   jobCounts(): Promise<Record<string, number>>;
   logAction(type: ActionType, refId: number | null, createdAt: string, value?: number | null): Promise<void>;

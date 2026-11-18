@@ -144,6 +144,18 @@ export class D1Store implements Store {
     await this.db.prepare("UPDATE jobs SET status = ? WHERE id = ?").bind(ok ? "done" : "failed", id).run();
   }
 
+  async addCost(kind: string, usd: number, createdAt: string) {
+    await this.db.prepare("INSERT INTO costs (kind, usd, created_at) VALUES (?, ?, ?)").bind(kind, usd, createdAt).run();
+  }
+
+  async costsSince(sinceIso: string) {
+    const { results } = await this.db
+      .prepare("SELECT kind, SUM(usd) AS usd, COUNT(*) AS n FROM costs WHERE created_at >= ? GROUP BY kind ORDER BY usd DESC")
+      .bind(sinceIso)
+      .all<{ kind: string; usd: number; n: number }>();
+    return results;
+  }
+
   async logAction(type: ActionType, refId: number | null, createdAt: string, value: number | null = null) {
     await this.db
       .prepare("INSERT INTO actions (type, ref_id, value, created_at) VALUES (?, ?, ?, ?)")

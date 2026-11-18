@@ -94,6 +94,20 @@ export class MemoryStore implements Store {
     const j = this.jobs.find((x) => x.id === id);
     if (j) j.status = ok ? "done" : "failed";
   }
+  costs: { kind: string; usd: number; createdAt: string }[] = [];
+  async addCost(kind: string, usd: number, createdAt: string) {
+    this.costs.push({ kind, usd, createdAt });
+  }
+  async costsSince(sinceIso: string) {
+    const by = new Map<string, { kind: string; usd: number; n: number }>();
+    for (const c of this.costs.filter((x) => x.createdAt >= sinceIso)) {
+      const e = by.get(c.kind) ?? { kind: c.kind, usd: 0, n: 0 };
+      e.usd += c.usd;
+      e.n++;
+      by.set(c.kind, e);
+    }
+    return [...by.values()].sort((a, b) => b.usd - a.usd);
+  }
   async logAction(type: ActionType, refId: number | null, createdAt: string, value: number | null = null) {
     this.actions.push({ type, refId, createdAt, value });
   }

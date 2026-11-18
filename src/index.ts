@@ -43,7 +43,7 @@ function makeBot(env: Env, web = false) {
     {
       store,
       messenger: new TelegramMessenger(env.TELEGRAM_BOT_TOKEN),
-      drafter: new ClaudeDrafter(env.ANTHROPIC_API_KEY, perfil),
+      drafter: new ClaudeDrafter(env.ANTHROPIC_API_KEY, perfil, (kind, cost) => store.addCost(kind, cost.usd, now().toISOString())),
       renderer: new BrowserRenderer(env.BROWSER),
       linkedin: makeLinkedIn(env, store),
       fetchPreview,

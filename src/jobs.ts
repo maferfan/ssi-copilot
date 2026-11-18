@@ -2,6 +2,8 @@ import type { Perfil } from "./perfil";
 import type { JobPosting } from "./types";
 
 export const JOBS_PER_REGION = 5;
+/** Buscas na web por /vagas: é a parte mais cara (cada busca traz o texto das páginas). Era 15. */
+export const JOB_SEARCHES = 9;
 /** Mínimo de salário no Brasil (por mês). */
 export const BR_MIN_SALARY = 10_000;
 /** Quantos links de vagas já enviadas guardar para não repetir. */

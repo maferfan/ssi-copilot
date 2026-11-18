@@ -66,6 +66,7 @@ Nada é publicado ou enviado no LinkedIn sem eu ver antes. Isso respeita os term
 | `/carrossel <tema>` | Cria o carrossel (sai na quinta) |
 | `/agora` | Gera as sugestões na hora, sem esperar as 18h |
 | `/agenda` | Carrosséis aprovados, com a data de cada um |
+| `/custos` | Quanto o Claude gastou na semana e no mês, por tipo, e o teto mensal (`/custos teto 8` muda o teto) |
 | `/status` | Versão publicada, quando a fila rodou pela última vez e quantos pedidos estão esperando ou com erro |
 | `/vagas` | 5 vagas no Brasil (a partir de R$ 10 mil) e 5 no exterior (remoto aceitando Brasil), com base no currículo; sai sozinho no sábado às 10h |
 | `/temas` | 8 temas em alta (software, front-end e IA), cada um com gancho, motivo e fonte; um toque monta o carrossel |
@@ -183,6 +184,8 @@ falta o texto → aguardando 18h → sugestão enviada → aprovado → comentad
 
 **Custo medido por carrossel.** Os tokens de entrada e saída e as buscas dos dois passos vêm do `usage` da API e são convertidos em dólar pelo preço do Sonnet 5.5 (US$ 2 / US$ 10 por milhão de tokens; US$ 10 por mil buscas). O valor aparece no cartão de cada carrossel.
 
+**Teto mensal de gasto.** Toda chamada ao Claude passa por um único método (`create` em [`src/claude.ts`](src/claude.ts)) que converte o `usage` (tokens, cache e buscas) em dólar e grava na tabela `costs`, com o tipo (vagas, carrossel, temas, post, comentário, cena), logo que a resposta chega, mesmo que algo falhe depois. O `/custos` soma a semana e o mês (no horário de Brasília). O teto padrão é US$ 5 por mês: aos 80%, o bot avisa uma vez; no teto, os pedidos com busca na web (carrossel, `/temas` e `/vagas`, inclusive o de sábado) param até o mês seguinte, e comentários e post de imagem continuam. `/vagas` usa 9 buscas (eram 15), a parte que mais pesava.
+
 **Duas filas semanais.** Cada post ou carrossel aprovado guarda o dia em que sai (`scheduled_for`). Os dois ficam na mesma tabela; o formato vem do conteúdo (post de imagem tem o campo `imagem`). Aprovar pega a primeira terça (post) ou quinta (carrossel) livre; no dia, sai só o da vez daquele formato (ou um atrasado). A publicação era na sexta às 18h; passou para terça e quinta às 8h30, quando o público de tecnologia está mais ativo, e a migração `0009` levou os carrosséis já agendados para a quinta seguinte.
 
 **Texto do post em duas línguas.** O Claude escreve as partes do post (título, gancho, pontos, conclusão e pergunta) em inglês e em português na mesma resposta estruturada, e o código monta ([`src/caption.ts`](src/caption.ts)): primeiro o bloco em português (é o que aparece antes do "ver mais"), um separador, o bloco em inglês, a nota das fontes e as hashtags uma vez só. Se passar de 3.000 caracteres, tira pontos do fim alternando entre as duas versões.
@@ -256,7 +259,7 @@ O bot nunca trava por causa do LinkedIn.
 | API do LinkedIn | Grátis |
 | Telegram | Grátis |
 | GitHub Actions | Grátis (repositório público) |
-| Claude API (Sonnet 5.5) | ~US$ 2–3 em créditos pré-pagos (3 comentários/dia e 4 carrosséis com pesquisa, ~US$ 0,15–0,30 cada) |
+| Claude API (Sonnet 5.5) | Créditos pré-pagos, com teto mensal no bot (padrão US$ 5). Por uso, aproximadamente: comentário US$ 0,01; post de imagem US$ 0,05; carrossel e `/temas` US$ 0,15–0,40; `/vagas` US$ 0,20–0,60. O `/custos` mostra o valor medido |
 
 ---
 

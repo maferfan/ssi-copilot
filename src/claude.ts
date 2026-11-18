@@ -3,7 +3,7 @@ import type { Perfil } from "./perfil";
 import { buildCaption, type PostParts, type PostTextParts } from "./caption";
 import { normalizeCarousel } from "./carousel";
 import { IMAGE_POST_SCHEMA, imagePostSystemPrompt, imagePostUserPrompt, normalizeImagePost } from "./imagepost";
-import { jobsPrompt } from "./jobs";
+import { JOB_SEARCHES, jobsPrompt } from "./jobs";
 import { detectLanguage } from "./language";
 import { NotAPostError, type CarouselChart, type CarouselContent, type CarouselCost, type Drafter, type JobPosting, type Post, type TopicIdea } from "./types";
 
@@ -364,15 +364,40 @@ export function carouselUserPrompt(topic: string, research: ResearchItem[], prev
   return `Topic: ${topic}\n\n${data}${prev}${ask}\n\nWrite the carousel in English.`;
 }
 
+/** Para que foi cada chamada ao Claude (o /custos agrupa por isto). */
+export type CostKind = "comentario" | "cena" | "carrossel" | "post" | "temas" | "vagas";
+
+/** Recebe o custo de cada chamada assim que ela termina (o bot grava no banco). */
+export type CostMeter = (kind: CostKind, cost: CarouselCost) => Promise<void>;
+
+export function usageCost(u: Anthropic.Beta.BetaUsage): CarouselCost {
+  return costOf({
+    input: u.input_tokens + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
+    output: u.output_tokens,
+    searches: u.server_tool_use?.web_search_requests ?? 0,
+  });
+}
+
 export class ClaudeDrafter implements Drafter {
   private client: Anthropic;
 
-  constructor(apiKey: string, private perfil: Perfil) {
+  constructor(
+    apiKey: string,
+    private perfil: Perfil,
+    private meter?: CostMeter,
+  ) {
     this.client = new Anthropic({ apiKey });
   }
 
+  /** Toda chamada passa por aqui: o custo é anotado logo, mesmo que algo falhe depois. */
+  private async create(kind: CostKind, params: Anthropic.Beta.MessageCreateParamsNonStreaming): Promise<Anthropic.Beta.BetaMessage> {
+    const response = await this.client.beta.messages.create(params);
+    await this.meter?.(kind, usageCost(response.usage)).catch((err) => console.error("custo não registrado", err));
+    return response;
+  }
+
   async draftComment(post: Pick<Post, "url" | "author" | "text">, avoid: string[]): Promise<string> {
-    const response = await this.client.beta.messages.create({
+    const response = await this.create("comentario", {
       model: MODEL,
       max_tokens: 16000,
       betas: ["server-side-fallback-2026-07-01"],
@@ -396,7 +421,7 @@ export class ClaudeDrafter implements Drafter {
 
   /** Passo 1: busca na web e devolve só os dados cujo link apareceu nos resultados. */
   async sceneToPrompt(scene: string): Promise<string> {
-    const response = await this.client.beta.messages.create({
+    const response = await this.create("cena", {
       model: MODEL,
       max_tokens: 2000,
       betas: ["server-side-fallback-2026-07-01"],
@@ -413,14 +438,14 @@ export class ClaudeDrafter implements Drafter {
   }
 
   /** Conversa com busca na web até a resposta final (a busca pode pausar no meio: pause_turn). */
-  private async searchAndAnswer(prompt: string, maxUses: number, what: string) {
+  private async searchAndAnswer(kind: CostKind, prompt: string, maxUses: number, what: string) {
     const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: prompt }];
     const content: unknown[] = [];
     let input = 0;
     let output = 0;
     let searches = 0;
     for (let turn = 0; turn < 6; turn++) {
-      const response = await this.client.beta.messages.create({
+      const response = await this.create(kind, {
         model: MODEL,
         max_tokens: 16000,
         betas: ["server-side-fallback-2026-07-01"],
@@ -446,19 +471,19 @@ export class ClaudeDrafter implements Drafter {
 
   /** Passo 1 do carrossel: dados com fonte, só os que tiveram o link conferido na busca. */
   private async research(topic: string): Promise<{ items: ResearchItem[]; input: number; output: number; searches: number }> {
-    const r = await this.searchAndAnswer(researchPrompt(topic), 6, "A pesquisa sobre esse tema");
+    const r = await this.searchAndAnswer("carrossel", researchPrompt(topic), 6, "A pesquisa sobre esse tema");
     return { items: verifyResearch(parseJsonArray<ResearchItem>(r.text), r.seen), input: r.input, output: r.output, searches: r.searches };
   }
 
   async findJobs(exclude: string[]): Promise<{ items: JobPosting[]; custo: CarouselCost; links: Set<string> }> {
-    const r = await this.searchAndAnswer(jobsPrompt(this.perfil, new Date(), exclude), 15, "A busca de vagas");
+    const r = await this.searchAndAnswer("vagas", jobsPrompt(this.perfil, new Date(), exclude), JOB_SEARCHES, "A busca de vagas");
     const items = parseJsonArray<JobPosting>(r.text);
     console.log("vagas", { sugeridas: items.length, links: r.seen.size, buscas: r.searches, inicio: r.text.slice(0, 120) });
     return { items, custo: costOf(r), links: r.seen };
   }
 
   async suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost; sugeridos: number; links: number }> {
-    const r = await this.searchAndAnswer(topicsPrompt(new Date()), 6, "A busca de temas");
+    const r = await this.searchAndAnswer("temas", topicsPrompt(new Date()), 6, "A busca de temas");
     const parsed = parseJsonArray<TopicIdea>(r.text);
     const items = verifyTopics(parsed, r.seen);
     console.log("temas", { sugeridos: parsed.length, links: r.seen.size, buscas: r.searches, mantidos: items.length, inicio: r.text.slice(0, 120) });
@@ -470,7 +495,7 @@ export class ClaudeDrafter implements Drafter {
     // Ajuste reaproveita as fontes já conferidas; tema novo ou "refazer" pesquisa de novo
     const research = previous && instructions ? { items: researchFromCarousel(previous), input: 0, output: 0, searches: 0 } : await this.research(topic);
 
-    const response = await this.client.beta.messages.create({
+    const response = await this.create("carrossel", {
       model: MODEL,
       max_tokens: 16000,
       betas: ["server-side-fallback-2026-07-01"],
@@ -507,7 +532,7 @@ export class ClaudeDrafter implements Drafter {
 
   /** Post de imagem única: sem pesquisa (não cita números); o Claude escolhe passo a passo ou errado × certo. */
   async draftImagePost(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent> {
-    const response = await this.client.beta.messages.create({
+    const response = await this.create("post", {
       model: MODEL,
       max_tokens: 16000,
       betas: ["server-side-fallback-2026-07-01"],

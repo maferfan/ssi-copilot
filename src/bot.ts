@@ -98,6 +98,50 @@ export function nextPublishLabel(now: Date, taken: (string | null)[] = [], forma
   return slotLabel(nextFreeSlot(now, taken, format), now);
 }
 
+/** Teto mensal de gasto com o Claude (US$) quando nada foi configurado em /custos teto. */
+export const DEFAULT_BUDGET_USD = 5;
+/** A partir desta fração do teto, o bot avisa (uma vez por mês). */
+export const BUDGET_WARN_AT = 0.8;
+/** Pedidos que usam busca na web (os caros): param quando o teto do mês é atingido. */
+const SEARCH_JOBS = new Set<Job["kind"]>(["carousel", "topics", "jobs"]);
+
+const COST_LABEL: Record<string, string> = {
+  vagas: "💼 Vagas",
+  carrossel: "🎠 Carrossel",
+  temas: "🔎 Temas",
+  post: "📌 Post de imagem",
+  comentario: "💬 Comentários",
+  cena: "🖼️ Cenas de imagem",
+};
+
+const MONTHS = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+
+/** Mês em Brasília, "AAAA-MM". */
+export function brMonth(now: Date): string {
+  return brDate(now).slice(0, 7);
+}
+
+/** Instante (UTC) em que o mês começa em Brasília: dia 1, 00:00 (= 03:00 UTC). */
+export function monthStartIso(now: Date): string {
+  return `${brMonth(now)}-01T03:00:00.000Z`;
+}
+
+/** "01/12": quando o teto volta a zerar. */
+function nextMonthLabel(now: Date): string {
+  const [y, m] = brMonth(now).split("-").map(Number);
+  return `01/${String((m % 12) + 1).padStart(2, "0")}${m === 12 ? `/${y + 1}` : ""}`;
+}
+
+const usd = (v: number) => `US$ ${v.toFixed(2).replace(".", ",")}`;
+
+/** "/custos teto 8" → 8; "teto 7,5" → 7.5; inválido → null. */
+export function parseBudget(arg: string): number | null {
+  const m = arg.trim().match(/^teto\s+(\d{1,4}(?:[.,]\d{1,2})?)$/i);
+  if (!m) return null;
+  const v = Number(m[1].replace(",", "."));
+  return v > 0 ? v : null;
+}
+
 const HELP = `<b>Como funciona</b>
 
 <b>Comentários</b>
@@ -121,6 +165,7 @@ Domingo às 18h chega o resumo da semana e eu peço 3 números das Análises do 
 /post — post de imagem (sai na ${dayName("post")})
 /carrossel — carrossel (sai na ${dayName("carousel")})
 /agenda — posts e carrosséis agendados, por data
+/custos — quanto o Claude gastou na semana e no mês, e o teto mensal
 /status — versão do bot e situação da fila
 /conectar — conectar o LinkedIn (vale por 2 meses)
 /agora — gerar as sugestões de comentário agora
@@ -445,6 +490,20 @@ export class Bot {
         case "status":
           await this.sendStatus(chatId);
           return;
+        case "custos":
+        case "custo": {
+          if (arg) {
+            const v = parseBudget(arg);
+            if (v === null) {
+              await messenger.send(chatId, "Para mudar o teto mensal, mande por exemplo <code>/custos teto 8</code> (em dólares).");
+              return;
+            }
+            await store.setSetting("budget_usd", String(v));
+            await store.setSetting("budget_warned", null);
+          }
+          await this.sendCosts(chatId);
+          return;
+        }
         default:
           await messenger.send(chatId, `Não conheço o comando <code>/${esc(cmd[1])}</code>.\n\n${HELP}`);
           return;
@@ -695,12 +754,21 @@ export class Bot {
   /** No webhook, vai para a fila (e avisa); no cron e nos testes, roda na hora. */
   private async schedule(job: Job, notice: string) {
     const chatId = await this.ownerChat();
+    if (SEARCH_JOBS.has(job.kind) && (await this.blockedByBudget(chatId))) return;
     if (chatId !== null) await this.deps.messenger.send(chatId, notice);
     if (this.deps.defer) await this.deps.defer(job);
     else await this.runJob(job);
   }
 
   async runJob(job: Job): Promise<void> {
+    try {
+      await this.runJobInner(job);
+    } finally {
+      await this.warnBudget().catch((err) => console.error("aviso de custo", err));
+    }
+  }
+
+  private async runJobInner(job: Job): Promise<void> {
     switch (job.kind) {
       case "daily":
         return this.runDaily();
@@ -867,6 +935,72 @@ export class Bot {
     await this.deps.messenger.send(chatId, `📅 <b>Agendados</b>\n\n${lines.join("\n")}\n\n<i>📌 post de imagem · 🎠 carrossel. Para tirar um da fila, toque em ❌ Descartar no cartão dele.</i>`);
   }
 
+  // ---------- custos ----------
+
+  private async budget(): Promise<number> {
+    const v = Number(await this.deps.store.getSetting("budget_usd"));
+    return v > 0 ? v : DEFAULT_BUDGET_USD;
+  }
+
+  private async monthSpent(): Promise<number> {
+    const rows = await this.deps.store.costsSince(monthStartIso(this.deps.now()));
+    return rows.reduce((t, r) => t + r.usd, 0);
+  }
+
+  /** Teto do mês atingido: avisa e devolve true (o pedido com busca não roda). */
+  private async blockedByBudget(chatId: number | null): Promise<boolean> {
+    const [spent, cap] = [await this.monthSpent(), await this.budget()];
+    if (spent < cap) return false;
+    if (chatId !== null) {
+      await this.deps.messenger.send(
+        chatId,
+        `⛔ <b>Teto do mês atingido:</b> ${usd(spent)} de ${usd(cap)}.\nPausei carrossel, /temas e /vagas até ${nextMonthLabel(this.deps.now())}. Comentários e post de imagem continuam.\nPara aumentar: <code>/custos teto ${Math.ceil(cap * 1.5)}</code>`,
+      );
+    }
+    return true;
+  }
+
+  /** Passou de 80% do teto: avisa uma vez no mês. */
+  async warnBudget(): Promise<void> {
+    const chatId = await this.ownerChat();
+    if (chatId === null) return;
+    const month = brMonth(this.deps.now());
+    if ((await this.deps.store.getSetting("budget_warned")) === month) return;
+    const [spent, cap] = [await this.monthSpent(), await this.budget()];
+    if (spent < cap * BUDGET_WARN_AT) return;
+    await this.deps.store.setSetting("budget_warned", month);
+    await this.deps.messenger.send(
+      chatId,
+      `⚠️ <b>Gasto do mês com o Claude:</b> ${usd(spent)} de ${usd(cap)} (${Math.round((spent / cap) * 100)}%).\nAo chegar no teto, carrossel, /temas e /vagas param até ${nextMonthLabel(this.deps.now())}. Detalhes em /custos.`,
+    );
+  }
+
+  /** /custos: semana e mês, por tipo, e o teto. */
+  private async sendCosts(chatId: number) {
+    const { store, messenger } = this.deps;
+    const now = this.deps.now();
+    const week = await store.costsSince(weekStartInstant(weekKey(now)).toISOString());
+    const month = await store.costsSince(monthStartIso(now));
+    const total = (rows: { usd: number }[]) => rows.reduce((t, r) => t + r.usd, 0);
+    const calls = (rows: { n: number }[]) => rows.reduce((t, r) => t + r.n, 0);
+    const cap = await this.budget();
+    const spent = total(month);
+    const lines = month.map((r) => `${COST_LABEL[r.kind] ?? r.kind}: ${usd(r.usd)} · ${r.n} ${r.n === 1 ? "chamada" : "chamadas"}`);
+    const bar = Math.min(10, Math.round((spent / cap) * 10));
+    await messenger.send(
+      chatId,
+      `💰 <b>Gastos com o Claude</b>
+
+Esta semana: <b>${usd(total(week))}</b> (${calls(week)} chamadas)
+Este mês (${MONTHS[Number(brMonth(now).slice(5, 7)) - 1]}): <b>${usd(spent)}</b> de ${usd(cap)}
+${"▰".repeat(bar)}${"▱".repeat(10 - bar)} ${Math.round((spent / cap) * 100)}%
+
+${lines.length ? `<b>No mês, por tipo:</b>\n${lines.join("\n")}` : "<i>Nenhum gasto registrado neste mês.</i>"}
+
+<i>Estimativa pelo uso de tokens e buscas de cada chamada, a partir de quando o /custos entrou no ar. O valor oficial está no Console da Anthropic (Usage). Ao chegar no teto, carrossel, /temas e /vagas param até o mês seguinte. Para mudar: <code>/custos teto 8</code>.</i>`,
+    );
+  }
+
   // ---------- /status ----------
 
   /** Versão publicada e situação da fila: para descobrir se algo travou sem abrir a Cloudflare. */
@@ -896,6 +1030,7 @@ Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · $
   /** Sábado, 10h (ou /vagas): 5 vagas no Brasil e 5 no exterior, sem repetir as já enviadas. */
   async sendJobs(chatId: number): Promise<void> {
     const { drafter, store, messenger } = this.deps;
+    if (await this.blockedByBudget(chatId)) return;
     const sent = JSON.parse((await store.getSetting("jobs_sent")) ?? "[]") as string[];
     let found;
     try {
@@ -1152,6 +1287,14 @@ Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · $
   }
 
   async runDaily(): Promise<void> {
+    try {
+      await this.runDailyInner();
+    } finally {
+      await this.warnBudget().catch((err) => console.error("aviso de custo", err));
+    }
+  }
+
+  private async runDailyInner(): Promise<void> {
     const { store, messenger, drafter, linkedin } = this.deps;
     const chatId = await this.ownerChat();
     if (chatId === null) return; // ninguém deu /start ainda
