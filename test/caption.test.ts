@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { boldUnicode, buildCaption, CAPTION_LIMIT, type PostParts } from "../src/caption";
-import { carouselSystemPrompt } from "../src/claude";
+import { imagePostSystemPrompt } from "../src/imagepost";
 import { perfil } from "../src/perfil";
 
 const parts = (over: Partial<PostParts> = {}): PostParts => ({
@@ -19,7 +19,7 @@ describe("texto do post", () => {
     expect(boldUnicode("ação")).toBe("𝗮çã𝗼"); // acentos ficam como estão
   });
 
-  it("estrutura: título, gancho, pontos em lista, conclusão, pergunta, fontes e hashtags", () => {
+  it("estrutura: título, gancho, pontos em lista, conclusão, pergunta e hashtags", () => {
     expect(buildCaption(parts())).toBe(
       [
         "𝗬𝗼𝘂𝗿 𝗔𝗣𝗜 𝗶𝘀 𝘀𝗹𝗼𝘄 𝗯𝗲𝗳𝗼𝗿𝗲 𝗶𝘁 𝗿𝘂𝗻𝘀",
@@ -27,7 +27,6 @@ describe("texto do post", () => {
         "→ Measure TTFB first\n→ Cache the query, not the page\n→ Move work out of the request",
         "Speed is a product decision, not a refactor.",
         "👉 What was the slowest endpoint you ever fixed?",
-        "📊 Sources are cited under each chart.",
         "#webperformance #backend #AIengineering",
       ].join("\n\n"),
     );
@@ -45,7 +44,7 @@ describe("texto do post", () => {
     expect(t).toContain("👉 What was the slowest endpoint");
   });
 
-  it("nas duas línguas: português primeiro, separador, inglês, fontes e hashtags uma vez só", () => {
+  it("nas duas línguas: português primeiro, separador, inglês e hashtags uma vez só", () => {
     const pt = {
       titulo: "Sua API é lenta antes de rodar",
       gancho: "Só 42% dos sites mobile têm um bom TTFB.",
@@ -58,7 +57,7 @@ describe("texto do post", () => {
     expect(t).toContain("→ Meça o TTFB primeiro\n→ Faça cache da consulta");
     expect(t).toContain("\n\n— — —\n\n🇺🇸 𝗬𝗼𝘂𝗿 𝗔𝗣𝗜");
     expect(t.indexOf("👉 Qual foi")).toBeLessThan(t.indexOf("👉 What was"));
-    expect(t).toContain("📊 Fontes em cada gráfico · Sources are cited under each chart.");
+    expect(t).not.toContain("Sources");
     expect(t.match(/#backend/g)).toHaveLength(1);
     expect(t.endsWith("#webperformance #backend #AIengineering")).toBe(true);
   });
@@ -76,10 +75,10 @@ describe("texto do post", () => {
     expect(buildCaption(parts())).not.toContain("🇺🇸");
   });
 
-  it("o pedido ao Claude descreve cada parte", () => {
-    const sys = carouselSystemPrompt(perfil);
-    expect(sys).toContain('"titulo": a strong headline, max 60 characters');
-    expect(sys).toContain('"gancho": 1 to 2 short sentences, max 160 characters');
-    expect(sys).toContain('"post_pt": the same post text in Brazilian Portuguese');
+  it("o pedido ao Claude descreve cada parte, nas duas línguas", () => {
+    const sys = imagePostSystemPrompt(perfil);
+    expect(sys).toContain('"titulo" (max 60 characters, shown in bold)');
+    expect(sys).toContain('"gancho" (max 160 characters, before "see more")');
+    expect(sys).toContain('"post_pt": the same in Brazilian Portuguese');
   });
 });

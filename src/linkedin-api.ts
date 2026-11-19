@@ -1,5 +1,5 @@
 import { decrypt, encrypt, randomHex } from "./crypto";
-import type { LinkedIn, LinkedInConnection, RenderedCarousel, Store } from "./types";
+import type { LinkedIn, LinkedInConnection, Store } from "./types";
 
 /** Versão da API REST do LinkedIn (formato AAAAMM). O LinkedIn aceita versões de até ~1 ano atrás. */
 export const LINKEDIN_VERSION = "202609";
@@ -165,14 +165,14 @@ export class LinkedInGateway implements LinkedIn {
     throw new LinkedInApiError(res.status, await res.text(), "comentário");
   }
 
-  // ---------- publicar carrossel ----------
+  // ---------- publicar ----------
 
-  private async upload(token: string, kind: "documents" | "images", owner: string, bytes: Uint8Array) {
+  private async upload(token: string, kind: "images", owner: string, bytes: Uint8Array) {
     const init = await this.rest(token, `${kind}?action=initializeUpload`, { method: "POST", body: { initializeUploadRequest: { owner } } }, `upload (${kind})`);
-    const { value } = (await init.json()) as { value: { uploadUrl: string; document?: string; image?: string } };
+    const { value } = (await init.json()) as { value: { uploadUrl: string; image: string } };
     const put = await this.http(value.uploadUrl, { method: "PUT", headers: { authorization: `Bearer ${token}` }, body: bytes });
     if (!put.ok) throw new LinkedInApiError(put.status, await put.text(), `envio do arquivo (${kind})`);
-    return (value.document ?? value.image)!;
+    return value.image;
   }
 
   private async createPost(token: string, person: string, caption: string, content: unknown) {
@@ -197,42 +197,10 @@ export class LinkedInGateway implements LinkedIn {
     return urn ? `https://www.linkedin.com/feed/update/${urn}/` : "https://www.linkedin.com/in/me/recent-activity/all/";
   }
 
-  /** Tenta como documento (carrossel em PDF); se o LinkedIn negar, publica como várias imagens. */
-  async publishCarousel(rendered: RenderedCarousel, title: string, caption: string): Promise<string> {
-    const { token, person } = await this.auth();
-    try {
-      const document = await this.upload(token, "documents", person, rendered.pdf);
-      await this.waitAvailable(token, document);
-      return await this.createPost(token, person, caption, { media: { title, id: document } });
-    } catch (err) {
-      if (!(err instanceof LinkedInApiError) || ![400, 401, 403, 422].includes(err.status)) throw err;
-      const ids: string[] = [];
-      for (const img of rendered.images) ids.push(await this.upload(token, "images", person, img));
-      return await this.createPost(token, person, caption, {
-        multiImage: { images: ids.map((id, i) => ({ id, altText: `${title} — slide ${i + 1}` })) },
-      });
-    }
-  }
-
   /** Post de imagem única (o infográfico de terça). */
   async publishImage(image: Uint8Array, altText: string, caption: string): Promise<string> {
     const { token, person } = await this.auth();
     const id = await this.upload(token, "images", person, image);
     return await this.createPost(token, person, caption, { media: { id, altText } });
-  }
-
-  /** O LinkedIn processa o PDF por alguns segundos antes de aceitar o post. */
-  private async waitAvailable(token: string, document: string) {
-    for (let i = 0; i < 10; i++) {
-      try {
-        const res = await this.rest(token, `documents/${encodeURIComponent(document)}`, { method: "GET" }, "status do documento");
-        const { status } = (await res.json()) as { status?: string };
-        if (status === "AVAILABLE") return;
-        if (status === "PROCESSING_FAILED") throw new Error("O LinkedIn não conseguiu processar o PDF.");
-      } catch (err) {
-        if (!(err instanceof LinkedInApiError)) throw err;
-      }
-      await new Promise((r) => setTimeout(r, 2000));
-    }
   }
 }

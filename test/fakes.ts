@@ -1,20 +1,18 @@
 import type {
   ActionType,
-  Carousel,
-  CarouselContent,
-  CarouselStatus,
+  PostDraft,
+  PostContent,
+  DraftStatus,
   Deps,
   Drafter,
   Job,
   InlineButton,
-  JobPosting,
   LinkedIn,
   LinkedInConnection,
   Messenger,
   Post,
   PostStatus,
   Preview,
-  RenderedCarousel,
   TopicIdea,
   Renderer,
   Store,
@@ -24,7 +22,7 @@ import type {
 export class MemoryStore implements Store {
   settings = new Map<string, string>();
   posts: Post[] = [];
-  carousels: Carousel[] = [];
+  drafts: PostDraft[] = [];
   metrics = new Map<string, WeeklyMetrics>();
   jobs: { id: number; job: Job; status: string }[] = [];
   actions: { type: ActionType; refId: number | null; createdAt: string; value: number | null }[] = [];
@@ -52,21 +50,21 @@ export class MemoryStore implements Store {
   async listPosts(statuses: PostStatus[], limit: number) {
     return this.posts.filter((p) => statuses.includes(p.status)).slice(0, limit).map((p) => ({ ...p }));
   }
-  async addCarousel(c: { topic: string; content: CarouselContent; createdAt: string }) {
-    const id = this.carousels.length + 1;
-    this.carousels.push({ id, topic: c.topic, content: c.content, status: "draft", created_at: c.createdAt, published_at: null, post_url: null, scheduled_for: null });
+  async addDraft(c: { topic: string; content: PostContent; createdAt: string }) {
+    const id = this.drafts.length + 1;
+    this.drafts.push({ id, topic: c.topic, content: c.content, status: "draft", created_at: c.createdAt, published_at: null, post_url: null, scheduled_for: null });
     return id;
   }
-  async getCarousel(id: number) {
-    const c = this.carousels.find((x) => x.id === id);
+  async getDraft(id: number) {
+    const c = this.drafts.find((x) => x.id === id);
     return c ? { ...c } : null;
   }
-  async updateCarousel(id: number, patch: Partial<Carousel>) {
-    const c = this.carousels.find((x) => x.id === id);
+  async updateDraft(id: number, patch: Partial<PostDraft>) {
+    const c = this.drafts.find((x) => x.id === id);
     if (c) Object.assign(c, patch);
   }
-  async listCarousels(statuses: CarouselStatus[]) {
-    return this.carousels.filter((c) => statuses.includes(c.status)).map((c) => ({ ...c }));
+  async listDrafts(statuses: DraftStatus[]) {
+    return this.drafts.filter((c) => statuses.includes(c.status)).map((c) => ({ ...c }));
   }
   async saveMetrics(m: WeeklyMetrics) {
     this.metrics.set(m.week, { ...m });
@@ -130,7 +128,6 @@ export class FakeMessenger implements Messenger {
   edits: { chatId: number; messageId: number; html: string; buttons?: InlineButton[][] }[] = [];
   answers: { id: string; text?: string }[] = [];
   photos: Uint8Array[][] = [];
-  documents: { filename: string; caption?: string }[] = [];
 
   async send(chatId: number, html: string, buttons?: InlineButton[][]) {
     const id = 1000 + this.sent.length;
@@ -146,9 +143,6 @@ export class FakeMessenger implements Messenger {
   async sendPhotos(_chatId: number, images: Uint8Array[]) {
     this.photos.push(images);
   }
-  async sendDocument(_chatId: number, _file: Uint8Array, filename: string, caption?: string) {
-    this.documents.push({ filename, caption });
-  }
   last() {
     return this.sent[this.sent.length - 1];
   }
@@ -158,21 +152,7 @@ export class FakeMessenger implements Messenger {
   }
 }
 
-export function sampleCarousel(titulo = "Como escolher a stack"): CarouselContent {
-  return {
-    titulo,
-    subtitulo: "Sem modinha",
-    slides: [
-      { titulo: "Comece pelo problema", texto: "..." },
-      { titulo: "Pense na manutenção", texto: "..." },
-      { titulo: "Meça antes", texto: "..." },
-    ],
-    fechamento: { titulo: "E você?", texto: "Conta aqui." },
-    legenda: "Legenda do post",
-  };
-}
-
-export function samplePost(titulo = "6 rules for **micro-interactions**"): CarouselContent {
+export function samplePost(titulo = "6 rules for **micro-interactions**"): PostContent {
   return {
     titulo,
     subtitulo: "Small details users feel",
@@ -187,34 +167,11 @@ export function samplePost(titulo = "6 rules for **micro-interactions**"): Carou
       ruim: { titulo: "", itens: [] },
       bom: { titulo: "", itens: [] },
     },
-    slides: [],
-    fechamento: { titulo: "", texto: "" },
     legenda: "Legenda do post de imagem",
   };
 }
 
-export const job = (over: Partial<JobPosting> = {}): JobPosting => ({
-  titulo: "Senior Frontend Engineer",
-  empresa: "Acme",
-  regiao: "br",
-  local: "Remoto (Brasil)",
-  salario: "R$ 14.000",
-  salario_ok: true,
-  motivo: "React e TypeScript, como no currículo.",
-  url: "https://www.linkedin.com/jobs/view/101",
-  ...over,
-});
-
 export class FakeDrafter implements Drafter {
-  jobCalls: string[][] = [];
-  jobResults: JobPosting[] = [
-    ...Array.from({ length: 6 }, (_, i) => job({ titulo: `BR ${i}`, url: `https://www.linkedin.com/jobs/view/10${i}`, salario_ok: i !== 0 })),
-    ...Array.from({ length: 6 }, (_, i) => job({ titulo: `Intl ${i}`, regiao: "intl", empresa: "Globex", local: "Remote (LATAM)", salario: "US$ 5k", url: `https://boards.greenhouse.io/globex/jobs/${i}` })),
-  ];
-  async findJobs(exclude: string[]) {
-    this.jobCalls.push(exclude);
-    return { items: this.jobResults, custo: { inputTokens: 1, outputTokens: 1, searches: 8, usd: 0.15 }, links: new Set(["linkedin.com/jobs/view/100", "boards.greenhouse.io/globex/jobs/0"]) };
-  }
   sceneCalls: string[] = [];
   async sceneToPrompt(scene: string) {
     this.sceneCalls.push(scene);
@@ -230,17 +187,12 @@ export class FakeDrafter implements Drafter {
     return { items: this.topicResults, custo: { inputTokens: 1000, outputTokens: 100, searches: 3, usd: 0.04 }, sugeridos: this.topicResults.length, links: 5 };
   }
   calls: { text: string | null; avoid: string[] }[] = [];
-  carouselCalls: { topic: string; previous?: CarouselContent; instructions?: string }[] = [];
   async draftComment(post: Pick<Post, "text">, avoid: string[]) {
     this.calls.push({ text: post.text, avoid });
     return `Comentário ${this.calls.length}`;
   }
-  async draftCarousel(topic: string, previous?: CarouselContent, instructions?: string) {
-    this.carouselCalls.push({ topic, previous, instructions });
-    return sampleCarousel(`Versão ${this.carouselCalls.length}`);
-  }
-  postCalls: { topic: string; previous?: CarouselContent; instructions?: string }[] = [];
-  async draftImagePost(topic: string, previous?: CarouselContent, instructions?: string) {
+  postCalls: { topic: string; previous?: PostContent; instructions?: string }[] = [];
+  async draftImagePost(topic: string, previous?: PostContent, instructions?: string) {
     this.postCalls.push({ topic, previous, instructions });
     return samplePost(`Post ${this.postCalls.length}`);
   }
@@ -248,10 +200,9 @@ export class FakeDrafter implements Drafter {
 
 export class FakeRenderer implements Renderer {
   calls = 0;
-  async render(c: CarouselContent): Promise<RenderedCarousel> {
+  async render(): Promise<Uint8Array> {
     this.calls++;
-    if (c.imagem) return { pdf: new Uint8Array(), images: [new Uint8Array([9])] };
-    return { pdf: new Uint8Array([1]), images: [new Uint8Array([2]), new Uint8Array([3])] };
+    return new Uint8Array([9]);
   }
 }
 
@@ -259,7 +210,6 @@ export class FakeLinkedIn implements LinkedIn {
   conn: LinkedInConnection | null = { name: "Matheus", expiresAt: "2027-01-01T00:00:00Z" };
   configured = true;
   comments: { urn: string; text: string }[] = [];
-  published: { title: string; caption: string }[] = [];
   images: { altText: string; caption: string }[] = [];
   failComment: Error | null = null;
   failPublish: Error | null = null;
@@ -278,11 +228,6 @@ export class FakeLinkedIn implements LinkedIn {
     if (this.failPublish) throw this.failPublish;
     this.images.push({ altText, caption });
     return "https://www.linkedin.com/feed/update/urn:li:share:2/";
-  }
-  async publishCarousel(_r: RenderedCarousel, title: string, caption: string) {
-    if (this.failPublish) throw this.failPublish;
-    this.published.push({ title, caption });
-    return "https://www.linkedin.com/feed/update/urn:li:share:1/";
   }
 }
 

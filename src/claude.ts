@@ -1,11 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Perfil } from "./perfil";
 import { buildCaption, type PostParts, type PostTextParts } from "./caption";
-import { normalizeCarousel } from "./carousel";
 import { IMAGE_POST_SCHEMA, imagePostSystemPrompt, imagePostUserPrompt, normalizeImagePost } from "./imagepost";
-import { JOB_SEARCHES, jobsPrompt } from "./jobs";
 import { detectLanguage } from "./language";
-import { NotAPostError, type CarouselChart, type CarouselContent, type CarouselCost, type Drafter, type JobPosting, type Post, type TopicIdea } from "./types";
+import { NotAPostError, type PostContent, type Cost, type Drafter, type Post, type TopicIdea } from "./types";
 
 export const MODEL = "claude-sonnet-5-5";
 
@@ -48,24 +46,10 @@ ${post.text ?? ""}
 Escreva um comentário para este post. ${idioma}${outras}`;
 }
 
-// ---------- carrossel: pesquisa com fontes + escrita em inglês ----------
-
-/** Dado encontrado na pesquisa. Os números do gráfico vêm daqui, nunca do texto escrito depois. */
-export interface ResearchItem {
-  id: string;
-  fonte: string;
-  ano: string;
-  url: string;
-  achado: string;
-  tipo: "bar" | "line";
-  unidade: string;
-  dados: { label: string; valor: number }[];
-}
-
 /** Preços do Claude Sonnet 5.5 (US$ por milhão de tokens) e da busca na web (por busca). */
 export const PRICE = { input: 2 / 1e6, output: 10 / 1e6, search: 10 / 1000 };
 
-export function costOf(usage: { input: number; output: number; searches: number }): CarouselCost {
+export function costOf(usage: { input: number; output: number; searches: number }): Cost {
   const usd = usage.input * PRICE.input + usage.output * PRICE.output + usage.searches * PRICE.search;
   return { inputTokens: usage.input, outputTokens: usage.output, searches: usage.searches, usd: Math.round(usd * 1000) / 1000 };
 }
@@ -94,15 +78,6 @@ export function searchedUrls(content: unknown[]): Set<string> {
     else grab(block);
   }
   return urls;
-}
-
-/** Fica só com dados cujo link apareceu na busca e que dão um gráfico (2 a 8 números). */
-export function verifyResearch(items: ResearchItem[], seen: Set<string>): ResearchItem[] {
-  return items.filter((it) => {
-    const key = it?.url ? urlKey(it.url) : null;
-    const dados = Array.isArray(it?.dados) ? it.dados.filter((d) => Number.isFinite(Number(d?.valor)) && String(d?.label ?? "").trim()) : [];
-    return Boolean(key && seen.has(key) && it.fonte?.trim() && dados.length >= 2 && dados.length <= 8);
-  });
 }
 
 /**
@@ -137,21 +112,6 @@ export function parseJsonArray<T>(text: string): T[] {
   return [];
 }
 
-export function researchPrompt(topic: string): string {
-  return `Topic for a LinkedIn carousel aimed at developers and tech recruiters: ${topic}
-
-Search the web and collect 3 to 6 quantitative data points that support this topic, from reputable primary sources (developer surveys such as Stack Overflow Developer Survey, State of JS/CSS, JetBrains; HTTP Archive Web Almanac; web.dev / Chrome UX Report; GitHub Octoverse; official statistics; peer-reviewed or well-known industry reports). Prefer data from the last 3 years.
-
-Rules:
-- Copy the numbers exactly as published. Do not estimate, round differently, combine or invent values.
-- Each data point must be chart-ready: 2 to 8 labelled numbers (e.g. percentages per answer, or a value per year).
-- "url" must be the page where the number is published.
-- Use "line" only for values over time; otherwise "bar".
-
-Reply at the end with ONLY a JSON array, no text before or after:
-[{"id": "R1", "fonte": "publisher or report name", "ano": "2025", "url": "https://...", "achado": "one-sentence finding", "tipo": "bar" | "line", "unidade": "%" or "ms" or "" , "dados": [{"label": "...", "valor": 42}]}]`;
-}
-
 // ---------- /temas: assuntos em alta ----------
 
 export function topicsPrompt(today: Date): string {
@@ -160,10 +120,10 @@ export function topicsPrompt(today: Date): string {
 
 Search recent news, release notes, surveys, engineering blogs and widely shared discussions (e.g. Hacker News, dev.to, The Pragmatic Engineer, InfoQ, official framework/tool blogs, LinkedIn News pages that are public).
 
-Run several different searches (at least one per area) so you have enough recent material. Suggest 8 carousel topics for a web developer's LinkedIn, mixing the three areas (2 to 3 per area). Prefer topics that spark discussion: a recent release or change people must react to, a surprising number, a common mistake, a debate with two sides. Avoid generic evergreen advice.
+Run several different searches (at least one per area) so you have enough recent material. Suggest 8 topics for a web developer's single-image LinkedIn posts (an infographic: a numbered step-by-step or a don't vs do comparison), mixing the three areas (2 to 3 per area). Prefer topics that turn into practical steps or a clear right vs wrong: a recent release or change people must adapt to, a common mistake, a best practice people get wrong. Avoid generic evergreen advice.
 
 For each topic give:
-- "titulo": a carousel topic in English, specific (max 10 words)
+- "titulo": a post topic in English, specific (max 10 words)
 - "area": "software" | "frontend" | "ai"
 - "gancho": the hook in English: the claim or question that opens the post (max 20 words)
 - "porque": in Brazilian Portuguese, one sentence on why it is engaging now (about the topic itself; no comments about your search or verification)
@@ -175,8 +135,7 @@ Only suggest topics backed by something you found in these searches. Reply at th
 
 /**
  * Temas sem repetidos, no máximo 8, os de site conferido primeiro.
- * Conferido = o site do link apareceu nos resultados da busca (para tema basta o site; os
- * números dos gráficos continuam exigindo a página exata em verifyResearch). Se houver menos
+ * Conferido = o site do link apareceu nos resultados da busca. Se houver menos
  * de 4 conferidos, completa com os outros, marcados como não conferidos.
  */
 export function verifyTopics(items: TopicIdea[], seen: Set<string>): TopicIdea[] {
@@ -194,183 +153,13 @@ export function verifyTopics(items: TopicIdea[], seen: Set<string>): TopicIdea[]
   return [...ok, ...rest].slice(0, 8);
 }
 
-export function carouselSystemPrompt(p: Perfil): string {
-  return `You write LinkedIn carousels (slide posts) for ${p.nome}, always in English.
-
-About ${p.nome}: ${p.resumo}
-Goal: ${p.objetivo}
-
-What a good carousel looks like:
-- Short carousels: 3 to 5 slides in total = cover + 1 to 3 content slides + closing. Prefer 1 content slide (3 slides total); use more only if the topic truly needs it.
-- The cover (slide 1) ALWAYS has a chart ("grafico_capa"): the strongest data point, used as the hook. Short title (up to 8 words) that the chart backs up, one-line subtitle.
-- Content slides: one idea each. Title up to 7 words. Text up to 40 words, or up to 28 words on a slide with a chart.
-- "imagem_prompt": one or two English sentences describing a cover illustration that makes the topic concrete (a scene or a metaphor with people or objects, e.g. "a developer at a desk watching a slow loading bar stretch across a dark room"). Describe only what is seen; never ask for text, words, charts or logos in the image.
-- At most 3 charts in total, counting the cover. Content slides without a chart use mode "none" (text only).
-  - mode "research": use a research item that fits (by its id). Its numbers are inserted automatically; do not repeat them in "dados". Prefer this whenever a research item fits.
-  - mode "illustrative": only if no research item fits any slide, so the carousel still has a chart. Use a conceptual comparison with obviously relative values (e.g. effort vs impact on a 1-10 scale). It is labelled "Illustrative" on the slide. Never present illustrative values as facts in the text.
-- Only state numbers in the text that come from a research item you are using on that slide.
-- The last slide wraps up and invites people to comment or follow.
-- Highlight at most one phrase per slide with **double asterisks**.
-- The post text ("post") is assembled by code from parts; write each part well:
-  - "titulo": a strong headline, max 60 characters, no emoji, no hashtags (it is shown in bold).
-  - "gancho": 1 to 2 short sentences, max 160 characters, that make people click "see more": a surprising number, a bold claim or a pain they recognize. Do not repeat the title.
-  - "pontos": 3 or 4 takeaways, max 120 characters each, concrete and skimmable; start with a verb or a number.
-  - "conclusao": one sentence with the main lesson or your opinion.
-  - "pergunta": one specific question people can answer from their own experience (not "what do you think?").
-  - "hashtags": 3 relevant hashtags, without the # sign.
-- "post_pt": the same post text in Brazilian Portuguese (titulo, gancho, pontos, conclusao, pergunta), written naturally for Brazilian developers, not a word-by-word translation. Keep the same numbers and ideas. The post is published in both languages, Portuguese first.
-- Practical, specific, no fluff. Tone: ${p.tom.join(" ")}`;
-}
-
-const CHART_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["modo", "id_pesquisa", "tipo", "titulo", "unidade", "dados"],
-  properties: {
-    modo: { type: "string", enum: ["research", "illustrative", "none"], description: "none = text-only slide" },
-    id_pesquisa: { type: "string", description: "Research item id (mode research); empty otherwise" },
-    tipo: { type: "string", enum: ["bar", "line"] },
-    titulo: { type: "string", description: "Short chart title" },
-    unidade: { type: "string", description: "Unit, e.g. % or ms; empty if none" },
-    dados: {
-      type: "array",
-      description: "Only for illustrative charts (2 to 6 points); empty otherwise",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["label", "valor"],
-        properties: { label: { type: "string" }, valor: { type: "number" } },
-      },
-    },
-  },
-} as const;
-
-const CAROUSEL_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["titulo", "subtitulo", "grafico_capa", "imagem_prompt", "slides", "fechamento", "post", "post_pt"],
-  properties: {
-    titulo: { type: "string", description: "Cover title" },
-    subtitulo: { type: "string", description: "One line under the cover title" },
-    imagem_prompt: { type: "string", description: "Cover illustration description in English, no text in the image" },
-    grafico_capa: { ...CHART_SCHEMA, description: "Cover chart (always present: research or illustrative, never none)" },
-    slides: {
-      type: "array",
-      description: "1 to 3 content slides (prefer 1); charts optional, at most 2 here",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["titulo", "texto", "grafico"],
-        properties: { titulo: { type: "string" }, texto: { type: "string" }, grafico: CHART_SCHEMA },
-      },
-    },
-    fechamento: {
-      type: "object",
-      additionalProperties: false,
-      required: ["titulo", "texto"],
-      properties: { titulo: { type: "string" }, texto: { type: "string" } },
-    },
-    post: {
-      type: "object",
-      additionalProperties: false,
-      required: ["titulo", "gancho", "pontos", "conclusao", "pergunta", "hashtags"],
-      properties: {
-        titulo: { type: "string", description: "Headline, max 60 characters" },
-        gancho: { type: "string", description: "Hook before 'see more', max 160 characters" },
-        pontos: { type: "array", items: { type: "string" }, description: "3 or 4 takeaways" },
-        conclusao: { type: "string" },
-        pergunta: { type: "string" },
-        hashtags: { type: "array", items: { type: "string" }, description: "3 hashtags without #" },
-      },
-    },
-    post_pt: {
-      type: "object",
-      additionalProperties: false,
-      description: "The same post text in Brazilian Portuguese",
-      required: ["titulo", "gancho", "pontos", "conclusao", "pergunta"],
-      properties: {
-        titulo: { type: "string", description: "Título, até 60 caracteres" },
-        gancho: { type: "string", description: "Gancho antes do 'ver mais', até 160 caracteres" },
-        pontos: { type: "array", items: { type: "string" }, description: "3 ou 4 pontos" },
-        conclusao: { type: "string" },
-        pergunta: { type: "string" },
-      },
-    },
-  },
-} as const;
-
-interface DraftChart {
-  modo: "research" | "illustrative" | "none";
-  id_pesquisa: string;
-  tipo: "bar" | "line";
-  titulo: string;
-  unidade: string;
-  dados: { label: string; valor: number }[];
-}
-
-/** Monta o gráfico final: com fonte, os números saem da pesquisa conferida; senão, vira ilustrativo. */
-export function buildChart(d: DraftChart | undefined, research: ResearchItem[]): CarouselChart | undefined {
-  if (!d || d.modo === "none") return undefined;
-  const item = d.modo === "research" ? research.find((r) => r.id === d.id_pesquisa) : undefined;
-  if (item) {
-    return {
-      tipo: item.tipo === "line" ? "line" : "bar",
-      titulo: d.titulo || item.achado,
-      unidade: item.unidade ?? "",
-      dados: item.dados.map((x) => ({ label: String(x.label), valor: Number(x.valor) })),
-      fonte: { nome: item.fonte, url: item.url, ano: item.ano ?? "" },
-      ilustrativo: false,
-    };
-  }
-  if (!Array.isArray(d.dados) || d.dados.length < 2) return undefined;
-  return { tipo: d.tipo, titulo: d.titulo, unidade: d.unidade, dados: d.dados, fonte: null, ilustrativo: true };
-}
-
-type ContentSlide = { titulo: string; texto: string; grafico?: CarouselChart };
-
-/**
- * A capa sempre tem gráfico: se o modelo não pôs, sobe o primeiro gráfico dos slides;
- * se nenhum slide tem, usa o primeiro dado conferido da pesquisa.
- */
-export function ensureCoverChart(cover: CarouselChart | undefined, slides: ContentSlide[], research: ResearchItem[]) {
-  if (cover) return { cover, slides };
-  const idx = slides.findIndex((s) => s.grafico);
-  if (idx >= 0) {
-    const moved = slides[idx].grafico;
-    return { cover: moved, slides: slides.map((s, i) => (i === idx ? { titulo: s.titulo, texto: s.texto } : s)) };
-  }
-  const first = research[0];
-  const fromResearch = first ? buildChart({ modo: "research", id_pesquisa: first.id, tipo: first.tipo, titulo: first.achado, unidade: "", dados: [] }, research) : undefined;
-  return { cover: fromResearch, slides };
-}
-
-/** Pesquisa já conferida de uma versão anterior, para ajustes não pagarem nova busca. */
-export function researchFromCarousel(c: CarouselContent): ResearchItem[] {
-  return [c.capa_grafico, ...c.slides.map((s) => s.grafico)].flatMap((g, i) =>
-    g?.fonte ? [{ id: `R${i + 1}`, fonte: g.fonte.nome, ano: g.fonte.ano, url: g.fonte.url, achado: g.titulo, tipo: g.tipo, unidade: g.unidade, dados: g.dados }] : [],
-  );
-}
-
-export function carouselUserPrompt(topic: string, research: ResearchItem[], previous?: CarouselContent, instructions?: string): string {
-  const data = research.length
-    ? `Research items (verified sources):\n${JSON.stringify(research, null, 2)}`
-    : "No verified research items were found: use illustrative charts only, and state no numbers as facts.";
-  const prev = previous ? `\n\nCurrent version:\n${JSON.stringify({ ...previous, custo: undefined }, null, 2)}` : "";
-  const ask = instructions
-    ? `\n\nChange requested by the author (keep everything else):\n<ajuste>\n${instructions}\n</ajuste>`
-    : previous
-      ? "\n\nThe author wants a completely different version (new angle, new examples)."
-      : "";
-  return `Topic: ${topic}\n\n${data}${prev}${ask}\n\nWrite the carousel in English.`;
-}
-
 /** Para que foi cada chamada ao Claude (o /custos agrupa por isto). */
-export type CostKind = "comentario" | "cena" | "carrossel" | "post" | "temas" | "vagas";
+export type CostKind = "comentario" | "cena" | "post" | "temas";
 
 /** Recebe o custo de cada chamada assim que ela termina (o bot grava no banco). */
-export type CostMeter = (kind: CostKind, cost: CarouselCost) => Promise<void>;
+export type CostMeter = (kind: CostKind, cost: Cost) => Promise<void>;
 
-export function usageCost(u: Anthropic.Beta.BetaUsage): CarouselCost {
+export function usageCost(u: Anthropic.Beta.BetaUsage): Cost {
   return costOf({
     input: u.input_tokens + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
     output: u.output_tokens,
@@ -469,20 +258,7 @@ export class ClaudeDrafter implements Drafter {
     throw new Error(`${what} não terminou.`);
   }
 
-  /** Passo 1 do carrossel: dados com fonte, só os que tiveram o link conferido na busca. */
-  private async research(topic: string): Promise<{ items: ResearchItem[]; input: number; output: number; searches: number }> {
-    const r = await this.searchAndAnswer("carrossel", researchPrompt(topic), 6, "A pesquisa sobre esse tema");
-    return { items: verifyResearch(parseJsonArray<ResearchItem>(r.text), r.seen), input: r.input, output: r.output, searches: r.searches };
-  }
-
-  async findJobs(exclude: string[]): Promise<{ items: JobPosting[]; custo: CarouselCost; links: Set<string> }> {
-    const r = await this.searchAndAnswer("vagas", jobsPrompt(this.perfil, new Date(), exclude), JOB_SEARCHES, "A busca de vagas");
-    const items = parseJsonArray<JobPosting>(r.text);
-    console.log("vagas", { sugeridas: items.length, links: r.seen.size, buscas: r.searches, inicio: r.text.slice(0, 120) });
-    return { items, custo: costOf(r), links: r.seen };
-  }
-
-  async suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost; sugeridos: number; links: number }> {
+  async suggestTopics(): Promise<{ items: TopicIdea[]; custo: Cost; sugeridos: number; links: number }> {
     const r = await this.searchAndAnswer("temas", topicsPrompt(new Date()), 6, "A busca de temas");
     const parsed = parseJsonArray<TopicIdea>(r.text);
     const items = verifyTopics(parsed, r.seen);
@@ -491,47 +267,8 @@ export class ClaudeDrafter implements Drafter {
   }
 
 
-  async draftCarousel(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent> {
-    // Ajuste reaproveita as fontes já conferidas; tema novo ou "refazer" pesquisa de novo
-    const research = previous && instructions ? { items: researchFromCarousel(previous), input: 0, output: 0, searches: 0 } : await this.research(topic);
-
-    const response = await this.create("carrossel", {
-      model: MODEL,
-      max_tokens: 16000,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      output_config: { effort: "high", format: { type: "json_schema", schema: CAROUSEL_SCHEMA } },
-      system: carouselSystemPrompt(this.perfil),
-      messages: [{ role: "user", content: carouselUserPrompt(topic, research.items, previous, instructions) }],
-    });
-
-    if (response.stop_reason === "refusal") throw new Error("O Claude não quis escrever sobre esse tema.");
-    if (response.stop_reason === "max_tokens") throw new Error("O carrossel ficou longo demais. Tente um tema mais específico.");
-    const json = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
-    const draft = JSON.parse(json) as Omit<CarouselContent, "slides" | "capa_grafico"> & {
-      grafico_capa?: DraftChart;
-      post?: PostParts;
-      post_pt?: PostTextParts;
-      slides: { titulo: string; texto: string; grafico?: DraftChart }[];
-    };
-    const custo = costOf({
-      input: research.input + response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0),
-      output: research.output + response.usage.output_tokens,
-      searches: research.searches,
-    });
-    const { cover, slides } = ensureCoverChart(
-      buildChart(draft.grafico_capa, research.items),
-      draft.slides.map((s) => ({ titulo: s.titulo, texto: s.texto, grafico: buildChart(s.grafico, research.items) })),
-      research.items,
-    );
-    const { grafico_capa: _ignored, post, post_pt, ...rest } = draft;
-    const legenda = post ? buildCaption(post, post_pt) : (rest.legenda ?? "");
-    return normalizeCarousel({ ...rest, legenda, capa_grafico: cover, slides, custo });
-  }
-
-
   /** Post de imagem única: sem pesquisa (não cita números); o Claude escolhe passo a passo ou errado × certo. */
-  async draftImagePost(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent> {
+  async draftImagePost(topic: string, previous?: PostContent, instructions?: string): Promise<PostContent> {
     const response = await this.create("post", {
       model: MODEL,
       max_tokens: 16000,
@@ -561,8 +298,6 @@ export class ClaudeDrafter implements Drafter {
       subtitulo: (d.subtitulo ?? "").trim(),
       ...(d.imagem_prompt?.trim() ? { imagem_prompt: d.imagem_prompt.trim() } : {}),
       imagem: normalizeImagePost(d),
-      slides: [],
-      fechamento: { titulo: "", texto: "" },
       legenda: buildCaption(d.post, d.post_pt),
       custo: costOf({
         input: response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0),

@@ -23,9 +23,8 @@ O sistema faz a parte chata (lembrar, ler, escrever o rascunho) e deixa para mim
 | Durante o dia | Vejo um post bom e mando o link para o bot | Eu (2 segundos) |
 | **Todo dia, 18h** | O bot manda até 3 sugestões de comentário, no meu tom | Claude |
 | | Aprovo (o bot publica no LinkedIn), peço outra versão, edito ou pulo | Eu + API do LinkedIn |
-| **Quando eu quiser** | Mando `/post <tema>` (imagem única) ou `/carrossel <tema>`; o Claude monta e eu aprovo a prévia | Eu + Claude |
+| **Quando eu quiser** | Mando `/post <tema>`; o Claude monta o post de imagem e eu aprovo a prévia | Eu + Claude |
 | **Terça, 8h30** | O post de imagem aprovado é publicado no meu perfil | API do LinkedIn |
-| **Quinta, 8h30** | O carrossel aprovado é publicado no meu perfil | API do LinkedIn |
 | **Durante a semana** | Mando convites de conexão no LinkedIn e registro quantos com `/convites 10`; o bot mostra quanto falta para a meta de 50 | Eu |
 | **Domingo, 18h** | Resumo da semana; mando 3 números das Análises do LinkedIn | Bot + eu (30 segundos) |
 | **Sempre** | Painel público com ações e resultados das últimas 12 semanas | Worker |
@@ -52,24 +51,17 @@ Nada é publicado ou enviado no LinkedIn sem eu ver antes. Isso respeita os term
 3. O cartão mostra os passos (ou os dois lados) e a legenda, com **✅ Aprovar · 🔄 Refazer · ✏️ Ajustar · ❌ Descartar · 🖼️ Outra imagem**. Ajustar aceita pedidos como "use o modelo errado × certo".
 4. Aprovado, entra na **próxima terça livre**, às 8h30. Na segunda, se não houver post para o dia seguinte, o bot pergunta o tema.
 
-**Carrossel (quinta)**
-1. `/carrossel how to choose a website stack`: o Claude **pesquisa na web** dados sobre o tema e escreve os slides **em inglês** e o texto do post **em português e em inglês** (português primeiro, porque a minha rede é brasileira), curto: **de 3 a 5 slides** (capa + 1 a 3 de conteúdo + fechamento), de preferência 3.
-2. **A capa (slide 1) sempre tem um gráfico**: o dado mais forte vira o gancho. No total são até 3 gráficos; os outros slides podem ser só texto. Com dado de pesquisa, o gráfico leva a fonte ("Source: …, 2025") embaixo de cada gráfico. Sem dado confiável, o gráfico sai marcado como **"Illustrative data, not a measurement"**.
-3. Chegam as imagens dos slides e o cartão com as fontes, o custo daquele carrossel (tokens, buscas e US$) e os botões **✅ Aprovar · 🔄 Refazer · ✏️ Ajustar · ❌ Descartar**. Ajustar reaproveita a pesquisa (sem novo custo de busca); Refazer pesquisa de novo.
-4. Aprovado, ele entra na **próxima quinta livre**, às 8h30. Se a próxima quinta já tem um, vai para a seguinte, e assim por diante. `/agenda` mostra as duas filas; descartar um agendado libera o dia dele.
-5. Na quarta, se não houver carrossel para o dia seguinte, o bot pergunta o tema. Se a publicação falhar, manda o PDF e a legenda para postar à mão.
+Uma versão anterior também fazia **carrosséis** (slides com gráficos de dados pesquisados na web) e uma **busca semanal de vagas**. O post de imagem rendeu mais impressões que o carrossel, e os dois usos com busca eram os mais caros, então saíram. O código deles está no histórico do Git.
 
 | Comando | O que faz |
 |---|---|
 | `/conectar` | Conecta o LinkedIn (OAuth) ou mostra até quando a conexão vale |
 | `/post <tema>` | Cria o post de imagem (sai na terça) |
-| `/carrossel <tema>` | Cria o carrossel (sai na quinta) |
 | `/agora` | Gera as sugestões na hora, sem esperar as 18h |
-| `/agenda` | Carrosséis aprovados, com a data de cada um |
+| `/agenda` | Posts aprovados, com a data de cada um |
 | `/custos` | Quanto o Claude gastou na semana e no mês, por tipo, e o teto mensal (`/custos teto 8` muda o teto) |
 | `/status` | Versão publicada, quando a fila rodou pela última vez e quantos pedidos estão esperando ou com erro |
-| `/vagas` | 5 vagas no Brasil (a partir de R$ 10 mil) e 5 no exterior (remoto aceitando Brasil), com base no currículo; sai sozinho no sábado às 10h |
-| `/temas` | 8 temas em alta (software, front-end e IA), cada um com gancho, motivo e fonte; um toque monta o carrossel |
+| `/temas` | 8 temas em alta (software, front-end e IA), cada um com gancho, motivo e fonte; um toque monta o post de imagem |
 | `/fila` | Mostra os posts salvos e em que etapa cada um está |
 | `/semana` | Resumo da semana (segunda a domingo), comparado com a anterior |
 | `/metricas 120 3400 215` | Registra visualizações do perfil, impressões e seguidores da semana |
@@ -120,8 +112,8 @@ flowchart LR
     W -- rascunho do comentário --> A[Claude API]
     W -- prévia pública do post --> L[linkedin.com]
     W -- comentários e posts (OAuth) --> LA[API do LinkedIn]
-    W -- HTML dos slides --> BR[Browser Run]
-    BR -- PDF + imagens --> W
+    W -- HTML da arte --> BR[Browser Run]
+    BR -- PNG --> W
     W <--> D[(Cloudflare D1)]
     GH[GitHub Actions] -- testes + deploy --> W
 ```
@@ -133,9 +125,9 @@ flowchart LR
 | **Telegram Bot API** | Interface: receber links e mostrar botões | Grátis, pronto em 2 minutos, botões nativos, webhook instantâneo | WhatsApp: a API oficial exige conta Business, um número separado e modelos aprovados, e cobra por conversa; as bibliotecas não oficiais arriscam banir o número |
 | **Cloudflare Workers** | Onde o código roda | Serverless e sempre no ar: responde ao webhook em milissegundos. Tem horários agendados (Cron Triggers) e o plano grátis cobra esse uso com folga | GitHub Actions: só roda em horários marcados, então os botões demorariam minutos. VPS: custa e exige manutenção |
 | **Cloudflare D1** | Banco de dados (SQLite) | SQL de verdade para consultas como "posts pendentes em ordem" e "ações por tipo na semana"; fica na mesma conta e de graça | KV: só chave e valor, sem consultas |
-| **Claude API** (Sonnet 5.5) | Escreve comentários e carrosséis | Escrita natural em português e inglês, seguindo um perfil de tom; o carrossel volta em JSON validado (saída estruturada) | Opus: qualidade parecida em textos curtos pelo dobro do preço |
+| **Claude API** (Sonnet 5.5) | Escreve comentários e posts | Escrita natural em português e inglês, seguindo um perfil de tom; o post volta em JSON validado (saída estruturada) | Opus: qualidade parecida em textos curtos pelo dobro do preço |
 | **API do LinkedIn** | Comentar e publicar no meu perfil | Oficial (produto "Share on LinkedIn", escopo `w_member_social`): nada de bot ou automação de navegador | Extensões e bots: proibidos e arriscam a conta |
-| **Cloudflare Browser Run** | Transformar o HTML dos slides em PDF e PNG | Um Chrome dentro da Cloudflare: os slides são HTML/CSS com as cores e fontes do meu site | Desenhar o PDF por código: mais trabalho e visual pior |
+| **Cloudflare Browser Run** | Transformar o HTML da arte em PNG | Um Chrome dentro da Cloudflare: a arte é HTML/CSS com as cores e fontes do meu site | Pedir a arte inteira a uma IA de imagem: ela erra letras |
 | **TypeScript** | Linguagem | Tipos pegam erros antes do deploy (ex.: um status de post que não existe) | JavaScript puro |
 | **Wrangler** | CLI da Cloudflare | Publica o Worker, aplica migrações e grava segredos; o `wrangler.toml` descreve tudo em texto | Configurar à mão no painel |
 | **GitHub Actions** | CI e deploy | Testa cada pull request e publica cada push na `main`, sem instalar nada no computador | Deploy manual |
@@ -166,37 +158,31 @@ falta o texto → aguardando 18h → sugestão enviada → aprovado → comentad
 
 **OAuth 2.0 com o LinkedIn.** `/conectar` gera um link com um `state` aleatório que vale 15 minutos. Na volta, o Worker confere o `state` (impede conexões forjadas), troca o código por um token de 60 dias e o guarda **criptografado com AES-GCM** ([`src/crypto.ts`](src/crypto.ts)). A senha do LinkedIn nunca passa pelo bot. Uma semana antes de vencer, o bot avisa para renovar.
 
-**Slides 16:9.** Os slides são horizontais (1920×1080), como os outros posts do perfil: preenchem a largura do feed no computador. Nos slides com gráfico, o texto fica à esquerda e o gráfico à direita.
+**Arte 4:5 desenhada por código.** O post é uma imagem em pé (1080×1350), o formato que mais ocupa a tela do celular. O texto é desenhado em HTML/CSS ([`src/imagepost.ts`](src/imagepost.ts)) e vira PNG no Browser Run, porque as IAs de imagem erram letras. Dois modelos: passo a passo (caminho em zigue-zague com 3 a 6 passos numerados) e errado × certo (❌ e ✅ lado a lado). O código confere o que o modelo devolveu (limite de passos e itens, textos curtos) e troca de modelo se o escolhido veio vazio.
 
-**Ilustração da capa com Flux.** O Claude descreve uma cena para a capa (`imagem_prompt`) e o Flux 1 Schnell, no Workers AI da Cloudflare, gera a ilustração, com um estilo fixo nas cores do site e sem texto na imagem ([`src/illustrator.ts`](src/illustrator.ts)). A capa fica com título e gráfico à esquerda e a ilustração na faixa direita. A imagem é guardada com o carrossel para a publicação; Ajustar reaproveita, Refazer gera outra; se falhar, o carrossel sai só com o gráfico. Cabe na cota grátis diária do Workers AI.
+**Ilustração com Flux.** O Claude descreve uma cena (`imagem_prompt`) e o Flux 1 Schnell, no Workers AI da Cloudflare, gera a ilustração redonda do topo da arte, com um estilo fixo nas cores do site e sem texto ([`src/illustrator.ts`](src/illustrator.ts)). Só entra imagem embutida (data URL); um link externo nunca vai para a arte. Se o Flux falhar, o post sai sem a ilustração.
 
-**Texto do post estruturado ([`src/caption.ts`](src/caption.ts)).** O Claude devolve as partes (título, gancho, 3 a 4 pontos, conclusão, pergunta e hashtags) e o código monta sempre no mesmo formato: título em negrito com letras Unicode (o LinkedIn não tem formatação), gancho curto para aparecer antes do "…ver mais", pontos com "→", pergunta com 👉, aviso das fontes e 3 hashtags, dentro do limite de 3.000 caracteres.
+**Texto do post estruturado ([`src/caption.ts`](src/caption.ts)).** O Claude devolve as partes (título, gancho, 3 a 4 pontos, conclusão, pergunta e hashtags) e o código monta sempre no mesmo formato: título em negrito com letras Unicode (o LinkedIn não tem formatação), gancho curto para aparecer antes do "…ver mais", pontos com "→", pergunta com 👉 e 3 hashtags, dentro do limite de 3.000 caracteres.
 
 **Trocar só a imagem.** O botão 🖼️ Outra imagem gera outra ilustração com a mesma cena ou com uma cena escrita pelo usuário (o Claude passa para inglês), sem reescrever o texto.
 
-**Vagas da semana (`/vagas`, [`src/jobs.ts`](src/jobs.ts)).** No sábado às 10h, o Claude busca na web vagas abertas nos últimos 30 dias que combinam com o currículo (em [`src/perfil.ts`](src/perfil.ts)): no Brasil, a partir de R$ 10 mil por mês; no exterior, remotas e aceitando quem mora no Brasil. Só entram vagas abertas, de preferência da última semana, em que a candidatura vai direto para a empresa: o site de carreira dela (inclusive o sistema de recrutamento, como Greenhouse ou Lever) ou o LinkedIn. Gupy, agregadores e sites de vagas genéricos, onde a candidatura raramente vira entrevista, ficam de fora, assim como grupos de WhatsApp/Telegram/Facebook/Discord e redes sociais. O código também confere que o site apareceu na busca, não repete vagas já enviadas e ordena por salário dentro do mínimo e, depois, pela aderência ao currículo (as sem salário informado vêm com ⚠️).
-
 **Temas em alta (`/temas`).** O Claude busca na web o que desenvolvedores estão discutindo nas últimas semanas (lançamentos, pesquisas, debates) em software, front-end e IA, e sugere 8 temas com gancho e motivo. Temas cujo site apareceu nos resultados da busca vêm primeiro; se forem menos de 4, os outros aparecem marcados "⚠️ fonte não conferida". Não são as métricas internas do LinkedIn, que não têm API pública.
 
-**Gráficos com fonte conferida, não inventada.** O carrossel é feito em dois passos ([`src/claude.ts`](src/claude.ts)):
-1. *Pesquisa:* o Claude usa a busca na web e devolve de 3 a 6 dados com fonte, ano, link e os números como foram publicados. O código só aceita um dado se o **link apareceu de verdade nos resultados da busca** (ou nas citações), nunca no texto livre do modelo, e se tiver de 2 a 8 números.
-2. *Escrita:* com saída estruturada, o Claude escreve os slides e escolhe, para cada gráfico, qual dado da pesquisa usar (pelo id) ou "ilustrativo". **Os números de um gráfico com fonte vêm da pesquisa conferida, nunca do texto escrito no segundo passo.** Um id que não existe vira ilustrativo, sem fonte.
+**Custo de cada chamada.** Os tokens de entrada e saída e as buscas vêm do `usage` da API e são convertidos em dólar pelo preço do Sonnet 5.5 (US$ 2 / US$ 10 por milhão de tokens; US$ 10 por mil buscas). O valor aparece no cartão de cada post e no `/custos`.
 
-**Custo medido por carrossel.** Os tokens de entrada e saída e as buscas dos dois passos vêm do `usage` da API e são convertidos em dólar pelo preço do Sonnet 5.5 (US$ 2 / US$ 10 por milhão de tokens; US$ 10 por mil buscas). O valor aparece no cartão de cada carrossel.
+**Teto mensal de gasto.** Toda chamada ao Claude passa por um único método (`create` em [`src/claude.ts`](src/claude.ts)) que converte o `usage` (tokens, cache e buscas) em dólar e grava na tabela `costs`, com o tipo (post, temas, comentário, cena), logo que a resposta chega, mesmo que algo falhe depois. O `/custos` soma a semana e o mês (no horário de Brasília). O teto padrão é US$ 5 por mês: aos 80%, o bot avisa uma vez; no teto, `/post` e `/temas` param até o mês seguinte, e os comentários continuam.
 
-**Teto mensal de gasto.** Toda chamada ao Claude passa por um único método (`create` em [`src/claude.ts`](src/claude.ts)) que converte o `usage` (tokens, cache e buscas) em dólar e grava na tabela `costs`, com o tipo (vagas, carrossel, temas, post, comentário, cena), logo que a resposta chega, mesmo que algo falhe depois. O `/custos` soma a semana e o mês (no horário de Brasília). O teto padrão é US$ 5 por mês: aos 80%, o bot avisa uma vez; no teto, os pedidos com busca na web (carrossel, `/temas` e `/vagas`, inclusive o de sábado) param até o mês seguinte, e comentários e post de imagem continuam. `/vagas` usa 9 buscas (eram 15), a parte que mais pesava.
+**Fila de terças.** Cada post aprovado guarda a terça em que sai (`scheduled_for`). Aprovar outro pega a primeira terça livre a partir da próxima; na terça, sai só o da vez (ou um atrasado, se uma terça passou sem publicar). A publicação era na sexta às 18h; passou para terça às 8h30, quando o público de tecnologia está mais ativo. Os posts ficam na tabela `carousels`, do tempo dos carrosséis; a migração `0011` descartou os carrosséis que ainda estavam na fila.
 
-**Duas filas semanais.** Cada post ou carrossel aprovado guarda o dia em que sai (`scheduled_for`). Os dois ficam na mesma tabela; o formato vem do conteúdo (post de imagem tem o campo `imagem`). Aprovar pega a primeira terça (post) ou quinta (carrossel) livre; no dia, sai só o da vez daquele formato (ou um atrasado). A publicação era na sexta às 18h; passou para terça e quinta às 8h30, quando o público de tecnologia está mais ativo, e a migração `0009` levou os carrosséis já agendados para a quinta seguinte.
+**Texto do post em duas línguas.** O Claude escreve as partes do post (título, gancho, pontos, conclusão e pergunta) em inglês e em português na mesma resposta estruturada, e o código monta ([`src/caption.ts`](src/caption.ts)): primeiro o bloco em português (é o que aparece antes do "ver mais"), um separador, o bloco em inglês e as hashtags uma vez só. Se passar de 3.000 caracteres, tira pontos do fim alternando entre as duas versões.
 
-**Texto do post em duas línguas.** O Claude escreve as partes do post (título, gancho, pontos, conclusão e pergunta) em inglês e em português na mesma resposta estruturada, e o código monta ([`src/caption.ts`](src/caption.ts)): primeiro o bloco em português (é o que aparece antes do "ver mais"), um separador, o bloco em inglês, a nota das fontes e as hashtags uma vez só. Se passar de 3.000 caracteres, tira pontos do fim alternando entre as duas versões.
+**Saída estruturada.** O post é pedido com um JSON Schema: modelo da arte, passos ou os dois lados, descrição da ilustração e o texto nas duas línguas. A API garante o formato, e o código ainda confere ([`normalizeImagePost`](src/imagepost.ts)) antes de desenhar.
 
-**Saída estruturada.** O carrossel é pedido com um JSON Schema: capa, lista de slides, fechamento e legenda. A API garante o formato, e o código ainda confere ([`normalizeCarousel`](src/carousel.ts)) antes de desenhar.
+**Plano B na publicação.** Se o LinkedIn recusar o post, o bot manda a imagem e a legenda prontas para eu postar à mão. Comentários seguem a mesma ideia: se a API recusar, o texto vem pronto para copiar.
 
-**Plano B em cascata na publicação.** Primeiro tenta como documento (o carrossel em PDF do LinkedIn). Se o LinkedIn negar, publica como post de várias imagens. Se ainda falhar, manda o PDF e a legenda para eu postar à mão. Comentários seguem a mesma ideia: se a API recusar, o texto vem pronto para copiar.
+**Agenda por dia da semana.** Um cron às 18h decide o que fazer pelo dia em Brasília: comentários todo dia, lembrete na véspera do post (segunda), resumo no domingo. A publicação tem um cron próprio (terça, 8h30), e um teste confere que ele bate com o dia e a hora que o bot mostra. As semanas vão de segunda a domingo no horário de Brasília ([`src/week.ts`](src/week.ts)); números enviados na segunda de manhã ainda contam para a semana do resumo.
 
-**Agenda por dia da semana.** Um cron às 18h decide o que fazer pelo dia em Brasília: comentários todo dia, lembrete na véspera do post e do carrossel, resumo no domingo. A publicação tem um cron próprio (terça e quinta, 8h30), e um teste confere que ele bate com os dias e a hora que o bot mostra. As semanas vão de segunda a domingo no horário de Brasília ([`src/week.ts`](src/week.ts)); números enviados na segunda de manhã ainda contam para a semana do resumo.
-
-**Fila para trabalhos longos.** Quando um pedido chega pelo Telegram, o Worker tem só ~30 segundos depois de responder. Montar um carrossel ou gerar várias sugestões pode levar mais que isso. Então o webhook só grava o pedido numa tabela `jobs` e avisa; um cron de cada minuto pega os pendentes (com `UPDATE … RETURNING`, para nenhum rodar duas vezes) e executa com até 15 minutos ([`src/index.ts`](src/index.ts)).
+**Fila para trabalhos longos.** Quando um pedido chega pelo Telegram, o Worker tem só ~30 segundos depois de responder. Montar um post (texto, ilustração e arte) ou gerar várias sugestões pode levar mais que isso. Então o webhook só grava o pedido numa tabela `jobs` e avisa; um cron de cada minuto pega os pendentes (com `UPDATE … RETURNING`, para nenhum rodar duas vezes) e executa com até 15 minutos ([`src/index.ts`](src/index.ts)).
 
 **Falhas avisam no Telegram.** O que roda sozinho (cron das 18h e fila) passa por um `guarded()`: se der erro, além do log da Cloudflare, chega no Telegram "⚠️ … falhou: motivo".
 
@@ -235,9 +221,9 @@ O bot nunca trava por causa do LinkedIn.
 | [`src/bot.ts`](src/bot.ts) | Toda a lógica: mensagens, botões, rodada das 18h |
 | [`src/types.ts`](src/types.ts) | Tipos e interfaces (`Store`, `Messenger`, `Drafter`) |
 | [`src/perfil.ts`](src/perfil.ts) | Meu tom, regras, exemplos e perfis que acompanho |
-| [`src/claude.ts`](src/claude.ts) | Prompts e chamadas à Claude API (comentário e carrossel) |
+| [`src/claude.ts`](src/claude.ts) | Prompts e chamadas à Claude API (comentário, post, temas) e o custo de cada chamada |
 | [`src/linkedin-api.ts`](src/linkedin-api.ts) | OAuth, comentar e publicar pela API oficial do LinkedIn |
-| [`src/carousel.ts`](src/carousel.ts) | Modelo HTML dos slides e geração do PDF/imagens |
+| [`src/render.ts`](src/render.ts) | Desenha a arte (HTML → PNG) no navegador da Cloudflare |
 | [`src/imagepost.ts`](src/imagepost.ts) | Post de imagem: pedido ao Claude, conferência e arte (passo a passo ou errado × certo) |
 | [`src/crypto.ts`](src/crypto.ts) | Criptografia do token do LinkedIn |
 | [`src/linkedin.ts`](src/linkedin.ts) | Extrair o link e ler a prévia pública do post |
@@ -245,7 +231,7 @@ O bot nunca trava por causa do LinkedIn.
 | [`src/week.ts`](src/week.ts) | Semanas de segunda a domingo no horário de Brasília |
 | [`src/crons.ts`](src/crons.ts) | Horários do cron (conferidos contra o `wrangler.toml` num teste) |
 | [`src/language.ts`](src/language.ts) | Detecta se o post está em português ou inglês |
-| [`src/telegram.ts`](src/telegram.ts) | Cliente da Bot API (mensagens, álbum, PDF) e senha do webhook |
+| [`src/telegram.ts`](src/telegram.ts) | Cliente da Bot API (mensagens, fotos) e senha do webhook |
 | [`src/store.ts`](src/store.ts) | Acesso ao D1 |
 | [`migrations/`](migrations) | Estrutura do banco |
 | [`test/`](test) | Testes e implementações falsas |
@@ -259,7 +245,7 @@ O bot nunca trava por causa do LinkedIn.
 | API do LinkedIn | Grátis |
 | Telegram | Grátis |
 | GitHub Actions | Grátis (repositório público) |
-| Claude API (Sonnet 5.5) | Créditos pré-pagos, com teto mensal no bot (padrão US$ 5). Por uso, aproximadamente: comentário US$ 0,01; post de imagem US$ 0,05; carrossel e `/temas` US$ 0,15–0,40; `/vagas` US$ 0,20–0,60. O `/custos` mostra o valor medido |
+| Claude API (Sonnet 5.5) | Créditos pré-pagos, com teto mensal no bot (padrão US$ 5). Por uso, aproximadamente: comentário US$ 0,01; post de imagem US$ 0,05; `/temas` US$ 0,15–0,30. O `/custos` mostra o valor medido |
 
 ---
 
@@ -321,8 +307,9 @@ npm run typecheck
 
 - [x] **Fase 1**: salvar posts pelo Telegram, sugestões às 18h, aprovar/editar/pular, registro de comentários
 - [x] **Fase 2**: resumo de domingo, números semanais das Análises do LinkedIn e dashboard público
-- [x] **Fase 3**: conexão OAuth com o LinkedIn, comentários publicados ao aprovar, carrossel com prévia e publicação semanal
+- [x] **Fase 3**: conexão OAuth com o LinkedIn, comentários publicados ao aprovar, conteúdo semanal com prévia e publicação automática
 - [x] **Fase 4**: contador semanal de convites com meta (`/convites`). Uma versão anterior buscava 50 recrutadores por semana com a busca na web do Claude e abria os perfis em abas; saiu por ser trabalhosa demais no uso real, e ficou só o registro.
+- [x] **Fase 5**: post de imagem semanal (infográfico desenhado por código), texto em português e inglês, `/custos` e teto mensal. O carrossel e a busca de vagas saíram: o post de imagem rendeu mais e os dois eram os usos mais caros.
 
 ## Licença
 

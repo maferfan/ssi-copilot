@@ -1,10 +1,10 @@
-import type { ActionType, Carousel, CarouselContent, CarouselStatus, Job, Post, PostStatus, Store, WeeklyMetrics } from "./types";
+import type { ActionType, PostDraft, PostContent, DraftStatus, Job, Post, PostStatus, Store, WeeklyMetrics } from "./types";
 
-interface CarouselRow extends Omit<Carousel, "content"> {
+interface DraftRow extends Omit<PostDraft, "content"> {
   content: string;
 }
 
-const toCarousel = (r: CarouselRow): Carousel => ({ ...r, content: JSON.parse(r.content) as CarouselContent });
+const toDraft = (r: DraftRow): PostDraft => ({ ...r, content: JSON.parse(r.content) as PostContent });
 
 /** Implementação do Store em cima do Cloudflare D1. */
 export class D1Store implements Store {
@@ -58,21 +58,21 @@ export class D1Store implements Store {
     return results;
   }
 
-  async addCarousel(c: { topic: string; content: CarouselContent; createdAt: string }) {
+  async addDraft(c: { topic: string; content: PostContent; createdAt: string }) {
     const row = await this.db
       .prepare("INSERT INTO carousels (topic, content, status, created_at) VALUES (?, ?, 'draft', ?) RETURNING id")
       .bind(c.topic, JSON.stringify(c.content), c.createdAt)
       .first<{ id: number }>();
-    if (!row) throw new Error("Falha ao salvar o carrossel");
+    if (!row) throw new Error("Falha ao salvar o post");
     return row.id;
   }
 
-  async getCarousel(id: number) {
-    const row = await this.db.prepare("SELECT * FROM carousels WHERE id = ?").bind(id).first<CarouselRow>();
-    return row ? toCarousel(row) : null;
+  async getDraft(id: number) {
+    const row = await this.db.prepare("SELECT * FROM carousels WHERE id = ?").bind(id).first<DraftRow>();
+    return row ? toDraft(row) : null;
   }
 
-  async updateCarousel(id: number, patch: Partial<Pick<Carousel, "status" | "published_at" | "post_url" | "scheduled_for">>) {
+  async updateDraft(id: number, patch: Partial<Pick<PostDraft, "status" | "published_at" | "post_url" | "scheduled_for">>) {
     const keys = Object.keys(patch) as (keyof typeof patch)[];
     if (keys.length === 0) return;
     await this.db
@@ -81,13 +81,13 @@ export class D1Store implements Store {
       .run();
   }
 
-  async listCarousels(statuses: CarouselStatus[]) {
+  async listDrafts(statuses: DraftStatus[]) {
     const marks = statuses.map(() => "?").join(", ");
     const { results } = await this.db
       .prepare(`SELECT * FROM carousels WHERE status IN (${marks}) ORDER BY created_at, id`)
       .bind(...statuses)
-      .all<CarouselRow>();
-    return results.map(toCarousel);
+      .all<DraftRow>();
+    return results.map(toDraft);
   }
 
   async saveMetrics(m: WeeklyMetrics, updatedAt: string) {

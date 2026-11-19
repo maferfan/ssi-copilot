@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { carouselHtml, normalizeCarousel } from "../src/carousel";
 import { decrypt, encrypt } from "../src/crypto";
 import { extractPostUrn } from "../src/linkedin";
 import { LINKEDIN_VERSION, LinkedInGateway } from "../src/linkedin-api";
-import { MemoryStore, sampleCarousel } from "./fakes";
+import { MemoryStore } from "./fakes";
 
 describe("extractPostUrn", () => {
   it.each([
@@ -129,45 +128,15 @@ describe("LinkedInGateway", () => {
     await expect(gw.comment("urn:li:activity:123", "Oi")).rejects.toThrow("Community Management");
   });
 
-  it("publica o carrossel como documento", async () => {
+  it("publica o post com uma imagem", async () => {
     const { gw, calls } = await connected({
-      "documents?action=initializeUpload": () => Response.json({ value: { uploadUrl: "https://upload.example/doc", document: "urn:li:document:9" } }),
-      "upload.example/doc": () => new Response(null, { status: 201 }),
-      "documents/urn": () => Response.json({ status: "AVAILABLE" }),
-      "rest/posts": () => new Response(null, { status: 201, headers: { "x-restli-id": "urn:li:share:77" } }),
-    });
-    const url = await gw.publishCarousel({ pdf: new Uint8Array([1]), images: [] }, "Título", "Legenda");
-    expect(url).toBe("https://www.linkedin.com/feed/update/urn:li:share:77/");
-    const post = JSON.parse(calls.find((c) => c.url.endsWith("rest/posts"))!.init!.body as string);
-    expect(post).toMatchObject({ author: "urn:li:person:abc", commentary: "Legenda", content: { media: { title: "Título", id: "urn:li:document:9" } } });
-  });
-
-  it("se documentos forem negados, publica como várias imagens", async () => {
-    let n = 0;
-    const { gw, calls } = await connected({
-      "documents?action=initializeUpload": () => new Response("forbidden", { status: 403 }),
-      "images?action=initializeUpload": () => Response.json({ value: { uploadUrl: `https://upload.example/img${++n}`, image: `urn:li:image:${n}` } }),
+      "images?action=initializeUpload": () => Response.json({ value: { uploadUrl: "https://upload.example/img", image: "urn:li:image:5" } }),
       "upload.example/img": () => new Response(null, { status: 201 }),
-      "rest/posts": () => new Response(null, { status: 201, headers: { "x-restli-id": "urn:li:share:78" } }),
+      "rest/posts": () => new Response(null, { status: 201, headers: { "x-restli-id": "urn:li:share:79" } }),
     });
-    await gw.publishCarousel({ pdf: new Uint8Array([1]), images: [new Uint8Array([2]), new Uint8Array([3])] }, "Título", "Legenda");
+    const url = await gw.publishImage(new Uint8Array([9]), "Título", "Legenda");
+    expect(url).toBe("https://www.linkedin.com/feed/update/urn:li:share:79/");
     const post = JSON.parse(calls.find((c) => c.url.endsWith("rest/posts"))!.init!.body as string);
-    expect(post.content.multiImage.images.map((i: { id: string }) => i.id)).toEqual(["urn:li:image:1", "urn:li:image:2"]);
-  });
-});
-
-describe("carrossel: formato e HTML", () => {
-  it("normaliza: no máximo 3 slides de conteúdo (5 no total) e rejeita carrossel incompleto", () => {
-    const many = { ...sampleCarousel(), slides: Array.from({ length: 12 }, (_, i) => ({ titulo: `S${i}`, texto: "x" })) };
-    expect(normalizeCarousel(many).slides).toHaveLength(3);
-    expect(normalizeCarousel({ ...sampleCarousel(), slides: [{ titulo: "Só um", texto: "" }] }).slides).toHaveLength(1);
-    expect(() => normalizeCarousel({ ...sampleCarousel(), slides: [] })).toThrow("incompleto");
-  });
-
-  it("gera um slide por página, numerado, com o texto escapado", () => {
-    const html = carouselHtml({ ...sampleCarousel("Use <div> & **flex**") });
-    expect(html.match(/<section class="slide/g)).toHaveLength(5); // capa + 3 + fechamento
-    expect(html).toContain("01 / 05");
-    expect(html).toContain('Use &lt;div&gt; &amp; <em class="hl">flex</em>');
+    expect(post).toMatchObject({ author: "urn:li:person:abc", commentary: "Legenda", content: { media: { id: "urn:li:image:5", altText: "Título" } } });
   });
 });

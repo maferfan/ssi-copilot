@@ -1,7 +1,7 @@
 {
   "name": "ssi-copilot",
   "version": "1.0.0",
-  "description": "Copiloto pessoal para aumentar o SSI do LinkedIn: sugestões de comentário, carrossel semanal e lista de recrutadores, com aprovação pelo Telegram.",
+  "description": "Copiloto pessoal para manter constância no LinkedIn: sugestões de comentário e um post de imagem por semana, com aprovação pelo Telegram.",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

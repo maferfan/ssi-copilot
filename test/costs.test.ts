@@ -67,40 +67,32 @@ describe("/custos", () => {
 });
 
 describe("teto mensal", () => {
-  it("atingido: /vagas, /temas e carrossel param; post de imagem continua", async () => {
+  it("atingido: /post e /temas param; os comentários continuam", async () => {
     const { bot, store, messenger, drafter } = await setup();
-    await store.addCost("vagas", 5.1, "2026-11-10T12:00:00Z");
-    for (const cmd of ["/vagas", "/temas", "/carrossel tema A"]) {
+    await store.addCost("post", 5.1, "2026-11-10T12:00:00Z");
+    for (const cmd of ["/post tema P", "/temas"]) {
       await bot.handleUpdate(msg(cmd));
       expect(messenger.last().html).toContain("Teto do mês atingido:</b> US$ 5,10 de US$ 5,00");
     }
-    expect(messenger.last().html).toContain("até 01/12");
-    expect(drafter.jobCalls).toHaveLength(0);
+    expect(messenger.last().html).toContain("Pausei /post e /temas até 01/12");
+    expect(drafter.postCalls).toHaveLength(0);
     expect(drafter.topicCalls).toBe(0);
-    expect(drafter.carouselCalls).toHaveLength(0);
-    await bot.handleUpdate(msg("/post tema P"));
-    expect(drafter.postCalls).toHaveLength(1);
-  });
-
-  it("as vagas automáticas de sábado também respeitam o teto", async () => {
-    const { bot, store, messenger, drafter } = await setup();
-    await store.addCost("vagas", 6, "2026-11-10T12:00:00Z");
-    await bot.sendJobs(OWNER);
-    expect(drafter.jobCalls).toHaveLength(0);
-    expect(messenger.last().html).toContain("Teto do mês atingido");
+    await bot.handleUpdate(msg("Os 5 erros mais comuns em entrevistas técnicas e como evitar cada um deles.\nhttps://www.linkedin.com/posts/fulana_x-activity-1"));
+    await bot.runDaily();
+    expect(drafter.calls).toHaveLength(1);
   });
 
   it("aumentar o teto libera de novo", async () => {
     const { bot, store, drafter } = await setup();
-    await store.addCost("vagas", 5.1, "2026-11-10T12:00:00Z");
+    await store.addCost("post", 5.1, "2026-11-10T12:00:00Z");
     await bot.handleUpdate(msg("/custos teto 8"));
-    await bot.handleUpdate(msg("/vagas"));
-    expect(drafter.jobCalls).toHaveLength(1);
+    await bot.handleUpdate(msg("/post tema P"));
+    expect(drafter.postCalls).toHaveLength(1);
   });
 
   it("passou de 80%: avisa uma vez no mês", async () => {
     const { bot, store, messenger } = await setup();
-    await store.addCost("carrossel", 4.2, "2026-11-10T12:00:00Z");
+    await store.addCost("post", 4.2, "2026-11-10T12:00:00Z");
     await bot.handleUpdate(msg("/post tema P"));
     const warns = () => messenger.sent.filter((s) => s.html.includes("Gasto do mês com o Claude")).length;
     expect(warns()).toBe(1);
@@ -112,8 +104,8 @@ describe("teto mensal", () => {
 
   it("abaixo de 80% não avisa", async () => {
     const { bot, store, messenger } = await setup();
-    await store.addCost("carrossel", 1, "2026-11-10T12:00:00Z");
-    await bot.handleUpdate(msg("/carrossel tema A"));
+    await store.addCost("post", 1, "2026-11-10T12:00:00Z");
+    await bot.handleUpdate(msg("/post tema A"));
     expect(messenger.sent.some((s) => s.html.includes("Gasto do mês"))).toBe(false);
   });
 });

@@ -81,20 +81,9 @@ export class TelegramMessenger implements Messenger {
     }
     const form = new FormData();
     form.set("chat_id", String(chatId));
-    form.set("media", JSON.stringify(images.slice(0, 10).map((_, i) => ({ type: "photo", media: `attach://slide${i}` }))));
-    images.slice(0, 10).forEach((img, i) => form.set(`slide${i}`, new Blob([img], { type: "image/png" }), `slide-${i + 1}.png`));
+    form.set("media", JSON.stringify(images.slice(0, 10).map((_, i) => ({ type: "photo", media: `attach://img${i}` }))));
+    images.slice(0, 10).forEach((img, i) => form.set(`img${i}`, new Blob([img], { type: "image/png" }), `imagem-${i + 1}.png`));
     await this.upload("sendMediaGroup", form);
-  }
-
-  async sendDocument(chatId: number, file: Uint8Array, filename: string, caption?: string) {
-    const form = new FormData();
-    form.set("chat_id", String(chatId));
-    form.set("document", new Blob([file], { type: "application/pdf" }), filename);
-    if (caption) {
-      form.set("caption", caption);
-      form.set("parse_mode", "HTML");
-    }
-    await this.upload("sendDocument", form);
   }
 
   async setWebhook(url: string, secretToken: string) {
@@ -111,10 +100,8 @@ export class TelegramMessenger implements Messenger {
       commands: [
         { command: "agora", description: "Gerar as sugestões de comentário agora" },
         { command: "post", description: "Post de imagem (terça): /post <tema>" },
-        { command: "carrossel", description: "Carrossel (quinta): /carrossel <tema>" },
-        { command: "vagas", description: "Vagas da semana: 5 no Brasil e 5 no exterior" },
-        { command: "temas", description: "Temas em alta (software, front-end, IA) para o carrossel" },
-        { command: "agenda", description: "Carrosséis agendados, por data" },
+        { command: "temas", description: "Temas em alta (software, front-end, IA) para o post" },
+        { command: "agenda", description: "Posts agendados, por data" },
         { command: "conectar", description: "Conectar ou ver a conexão com o LinkedIn" },
         { command: "fila", description: "Ver os posts salvos" },
         { command: "semana", description: "Resumo da semana" },

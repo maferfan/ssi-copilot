@@ -1,11 +1,9 @@
 import { detectLanguage } from "./language";
-import { BR_MIN_SALARY, JOBS_PER_REGION, selectJobs, SENT_MEMORY, type JobRejects } from "./jobs";
 import { urlKey } from "./claude";
 import { extractLinkedInUrl, extractPostUrn, isBoilerplate, isLoginWall, textAroundUrl } from "./linkedin";
 import type { Perfil } from "./perfil";
 import type { TgUpdate } from "./telegram";
-import { isImagePost } from "./imagepost";
-import { NotAPostError, type PostFormat, type Awaiting, type Carousel, type CarouselContent, type Deps, type InlineButton, type Job, type JobPosting, type LinkedInConnection, type Post, type TopicIdea, type WeeklyMetrics } from "./types";
+import { NotAPostError, type Awaiting, type PostDraft, type PostContent, type Deps, type InlineButton, type Job, type LinkedInConnection, type Post, type TopicIdea, type WeeklyMetrics } from "./types";
 import { shiftWeek, weekKey, weekLabel, weekStartInstant } from "./week";
 
 /** Quantos posts no máximo viram sugestão a cada rodada das 18h. */
@@ -50,60 +48,46 @@ function addDays(date: string, days: number): string {
   return new Date(new Date(`${date}T12:00:00Z`).getTime() + days * DAY_MS).toISOString().slice(0, 10);
 }
 
-/**
- * Dias de publicação (Brasília), sempre às 8h30: post de imagem na terça, carrossel na quinta.
- * Precisam bater com CRONS.publish (um teste confere).
- */
-export const PUBLISH_WEEKDAYS: Record<PostFormat, number> = { post: 2, carousel: 4 };
+/** Publicação do post de imagem (Brasília): terça, 8h30. Precisa bater com CRONS.publish (um teste confere). */
+export const PUBLISH_WEEKDAY = 2;
 export const PUBLISH_MINUTES = 8 * 60 + 30;
 export const PUBLISH_TIME = "8h30";
 const WEEKDAYS = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
-const dayName = (f: PostFormat) => WEEKDAYS[PUBLISH_WEEKDAYS[f]];
-const FORMAT_NAME: Record<PostFormat, string> = { post: "post", carousel: "carrossel" };
+const PUBLISH_DAY = WEEKDAYS[PUBLISH_WEEKDAY];
 
-export function formatOf(c: Pick<Carousel, "content">): PostFormat {
-  return isImagePost(c.content) ? "post" : "carousel";
-}
-
-/** Formato que sai neste dia da semana, se algum. */
-export function formatForWeekday(day: number): PostFormat | null {
-  return (Object.keys(PUBLISH_WEEKDAYS) as PostFormat[]).find((f) => PUBLISH_WEEKDAYS[f] === day) ?? null;
-}
-
-/** Primeiro dia de publicação possível: hoje, se for o dia e ainda não deu a hora; senão, o próximo. */
-export function firstSlot(now: Date, format: PostFormat = "carousel"): string {
-  const weekday = PUBLISH_WEEKDAYS[format];
+/** Primeiro dia de publicação possível: hoje, se for terça e ainda não deu a hora; senão, a próxima. */
+export function firstSlot(now: Date): string {
   const b = brt(now);
   const day = b.getUTCDay();
-  if (day === weekday && b.getUTCHours() * 60 + b.getUTCMinutes() < PUBLISH_MINUTES) return brDate(now);
-  return addDays(brDate(now), (weekday - day + 7) % 7 || 7);
+  if (day === PUBLISH_WEEKDAY && b.getUTCHours() * 60 + b.getUTCMinutes() < PUBLISH_MINUTES) return brDate(now);
+  return addDays(brDate(now), (PUBLISH_WEEKDAY - day + 7) % 7 || 7);
 }
 
-/** Próximo dia livre do formato: se o primeiro está ocupado, a semana seguinte, e assim por diante. */
-export function nextFreeSlot(now: Date, taken: (string | null)[], format: PostFormat = "carousel"): string {
-  let date = firstSlot(now, format);
+/** Próxima terça livre: se a primeira está ocupada, a seguinte, e assim por diante. */
+export function nextFreeSlot(now: Date, taken: (string | null)[]): string {
+  let date = firstSlot(now);
   while (taken.includes(date)) date = addDays(date, 7);
   return date;
 }
 
-/** "hoje (terça) às 8h30" ou "quinta, 19/11, às 8h30" (o dia da semana sai da própria data). */
+/** "hoje (terça) às 8h30" ou "terça, 24/11, às 8h30" (o dia da semana sai da própria data). */
 export function slotLabel(date: string, now: Date): string {
   const day = WEEKDAYS[new Date(`${date}T12:00:00Z`).getUTCDay()];
   if (date === brDate(now)) return `hoje (${day}) às ${PUBLISH_TIME}`;
   return `${day}, ${date.slice(8, 10)}/${date.slice(5, 7)}, às ${PUBLISH_TIME}`;
 }
 
-/** Quando sairia um aprovado agora (respeitando a fila do formato). */
-export function nextPublishLabel(now: Date, taken: (string | null)[] = [], format: PostFormat = "carousel"): string {
-  return slotLabel(nextFreeSlot(now, taken, format), now);
+/** Quando sairia um post aprovado agora (respeitando a fila). */
+export function nextPublishLabel(now: Date, taken: (string | null)[] = []): string {
+  return slotLabel(nextFreeSlot(now, taken), now);
 }
 
 /** Teto mensal de gasto com o Claude (US$) quando nada foi configurado em /custos teto. */
 export const DEFAULT_BUDGET_USD = 5;
 /** A partir desta fração do teto, o bot avisa (uma vez por mês). */
 export const BUDGET_WARN_AT = 0.8;
-/** Pedidos que usam busca na web (os caros): param quando o teto do mês é atingido. */
-const SEARCH_JOBS = new Set<Job["kind"]>(["carousel", "topics", "jobs"]);
+/** Pedidos que param quando o teto do mês é atingido (só os comentários continuam). */
+const PAUSED_AT_CAP = new Set<Job["kind"]>(["post", "topics", "image"]);
 
 const COST_LABEL: Record<string, string> = {
   vagas: "💼 Vagas",
@@ -149,10 +133,9 @@ const HELP = `<b>Como funciona</b>
 2. Todo dia às <b>18h</b> chegam até ${DAILY_LIMIT} sugestões de comentário.
 3. ✅ Aprovar publica o comentário direto no LinkedIn. Também dá para pedir outra versão, editar ou pular.
 
-<b>Post de ${dayName("post")} e carrossel de ${dayName("carousel")}</b>
-1. <code>/post</code> e o tema: uma imagem só, no estilo infográfico (passo a passo ou errado × certo). Ex.: <code>/post boas práticas de micro-interações</code>.
-2. <code>/carrossel</code> e o tema: slides com gráficos e fontes. Sem ideia? <code>/temas</code> sugere assuntos em alta.
-3. Eu mando a prévia. Aprovado, o post entra na próxima ${dayName("post")} livre e o carrossel na próxima ${dayName("carousel")} livre, às ${PUBLISH_TIME}. O texto sai em português e em inglês.
+<b>Post de ${PUBLISH_DAY}</b>
+1. <code>/post</code> e o tema: uma imagem só, no estilo infográfico (passo a passo ou errado × certo). Ex.: <code>/post boas práticas de micro-interações</code>. Sem ideia? <code>/temas</code> sugere assuntos em alta.
+2. Eu mando a prévia. Aprovado, ele entra na próxima ${PUBLISH_DAY} livre, às ${PUBLISH_TIME}. O texto sai em português e em inglês.
 
 <b>Convites</b>
 Meta: ${WEEKLY_INVITE_GOAL} convites por semana. Mandou alguns? Registre com <code>/convites 10</code> (para corrigir, <code>/convites -2</code>). <code>/convites</code> sozinho mostra quantos faltam.
@@ -160,11 +143,9 @@ Meta: ${WEEKLY_INVITE_GOAL} convites por semana. Mandou alguns? Registre com <co
 <b>Resumo e painel</b>
 Domingo às 18h chega o resumo da semana e eu peço 3 números das Análises do LinkedIn (/metricas). Eles vão para o painel (/painel).
 
-/vagas — 5 vagas no Brasil e 5 no exterior (sai sozinho no sábado)
-/temas — temas em alta para o próximo carrossel
-/post — post de imagem (sai na ${dayName("post")})
-/carrossel — carrossel (sai na ${dayName("carousel")})
-/agenda — posts e carrosséis agendados, por data
+/post — post de imagem (sai na ${PUBLISH_DAY})
+/temas — temas em alta para o próximo post
+/agenda — posts agendados, por data
 /custos — quanto o Claude gastou na semana e no mês, e o teto mensal
 /status — versão do bot e situação da fila
 /conectar — conectar o LinkedIn (vale por 2 meses)
@@ -174,18 +155,6 @@ Domingo às 18h chega o resumo da semana e eu peço 3 números das Análises do 
 /metricas — registrar os números da semana
 /painel — link do dashboard
 /convites — registrar convites e ver quantos faltam`;
-
-/** Por que as sugestões do Claude não viraram vaga (para entender um /vagas vazio). */
-export function rejectsLine(sugeridas: number, links: number, r: JobRejects): string {
-  if (sugeridas === 0) return `O Claude não devolveu nenhuma vaga (a busca trouxe ${links} links).`;
-  const parts = [
-    r.plataforma && `${r.plataforma} em Gupy/agregadores`,
-    r.fora_da_busca && `${r.fora_da_busca} com link que não apareceu na busca`,
-    r.ja_enviada && `${r.ja_enviada} já enviadas antes`,
-    r.incompleta && `${r.incompleta} sem link, título ou empresa`,
-  ].filter(Boolean);
-  return `O Claude sugeriu ${sugeridas}, mas nenhuma passou nos filtros: ${parts.join(", ")}.`;
-}
 
 /** "/convites 12", "+12" ou "-3" → 12, 12, -3. */
 export function parseInviteCount(text: string): number | null {
@@ -249,8 +218,9 @@ ${esc(text)}
 }
 
 /** Cartão do post de imagem: o modelo escolhido e o que vai escrito na arte. */
-export function imagePostCard(c: Carousel, when: string): string {
-  const img = c.content.imagem!;
+export function postCard(c: PostDraft, when: string): string {
+  const img = c.content.imagem;
+  if (!img) return `🎠 <b>Carrossel antigo</b> · ${esc(c.topic)}\n\n<b>${esc(c.content.titulo.replace(/\*\*/g, ""))}</b>\n\n<i>O bot não faz mais carrosséis.</i>`;
   const body =
     img.layout === "steps"
       ? `🪜 <b>Passo a passo</b>\n${img.passos.map((p, i) => `${i + 1}. ${esc(p.titulo)}${p.texto ? ` — <i>${esc(p.texto)}</i>` : ""}`).join("\n")}`
@@ -264,36 +234,6 @@ export function imagePostCard(c: Carousel, when: string): string {
 ${esc(c.content.subtitulo)}
 
 ${body}${art}${cost}
-
-<b>Legenda do post:</b>
-${esc(c.content.legenda)}
-
-Aprovando, ele é publicado ${when}.`;
-}
-
-export function carouselCard(c: Carousel, when: string): string {
-  if (c.content.imagem) return imagePostCard(c, when);
-  const slides = c.content.slides
-    .map((s, i) => {
-      const g = s.grafico;
-      const chart = !g ? "" : g.fonte ? ` · 📊 ${esc(g.fonte.nome)}${g.fonte.ano ? ` ${esc(g.fonte.ano)}` : ""}` : " · 📊 <i>ilustrativo</i>";
-      return `${i + 1}. ${esc(s.titulo.replace(/\*\*/g, ""))}${chart}`;
-    })
-    .join("\n");
-  const cg = c.content.capa_grafico;
-  const cover = cg ? `\nCapa · 📊 ${cg.fonte ? `${esc(cg.fonte.nome)}${cg.fonte.ano ? ` ${esc(cg.fonte.ano)}` : ""}` : "<i>ilustrativo</i>"}` : "\nCapa · ⚠️ <i>sem gráfico</i>";
-  const art = c.content.capa_imagem ? "\n🖼️ Ilustração gerada na capa" : "";
-  const refs = c.content.referencias?.length ?? 0;
-  const sources = refs ? `\n🔗 ${refs === 1 ? "1 fonte conferida" : `${refs} fontes conferidas`}, citadas embaixo de cada gráfico.` : "\n⚠️ <i>Nenhuma fonte conferida: todos os gráficos são ilustrativos.</i>";
-  const k = c.content.custo;
-  const cost = k
-    ? `\n💰 ${(k.inputTokens / 1000).toFixed(1)}k tokens de entrada, ${(k.outputTokens / 1000).toFixed(1)}k de saída, ${k.searches} ${k.searches === 1 ? "busca" : "buscas"} ≈ US$ ${k.usd.toFixed(2)}`
-    : "";
-  return `🎠 <b>Carrossel</b> · ${esc(c.topic)}
-
-<b>${esc(c.content.titulo.replace(/\*\*/g, ""))}</b>${cover}${art}
-${slides}
-${sources}${cost}
 
 <b>Legenda do post:</b>
 ${esc(c.content.legenda)}
@@ -321,41 +261,18 @@ ${t.conferido === false ? "⚠️ fonte não conferida" : "🔗"} ${esc(t.fonte 
 
 ${lines.join("\n\n")}
 
-Toque no número para montar o carrossel daquele tema.
+Toque no número para montar o post de imagem daquele tema.
 <i>Busca na web, não as métricas internas do LinkedIn · ≈ US$ ${usd.toFixed(2)}</i>`;
 }
 
-export function jobsMessage(jobs: JobPosting[], usd: number): string {
-  const block = (list: JobPosting[], title: string) => {
-    if (list.length === 0) return `${title}\n<i>Nenhuma vaga nova desta vez.</i>`;
-    const items = list.map(
-      (j, i) => `<b>${i + 1}. ${esc(j.titulo)}</b> · ${esc(j.empresa)}
-📍 ${esc(j.local || "não informado")} · 💰 ${esc(j.salario)}${j.salario_ok ? "" : " ⚠️"}${j.aderencia ? ` · 🎯 ${j.aderencia}% de aderência` : ""}
-${esc(j.motivo)}
-🔗 ${esc(j.url)}`,
-    );
-    const short = list.length < JOBS_PER_REGION ? `\n<i>Só achei ${list.length} desta vez.</i>` : "";
-    return `${title}\n\n${items.join("\n\n")}${short}`;
-  };
-  const br = jobs.filter((j) => j.regiao === "br");
-  const intl = jobs.filter((j) => j.regiao === "intl");
-  return `💼 <b>Vagas da semana</b>
-
-${block(br, `🇧🇷 <b>Brasil</b> (a partir de R$ ${BR_MIN_SALARY.toLocaleString("pt-BR")})`)}
-
-${block(intl, "🌎 <b>Exterior</b> (remoto, aceita quem mora no Brasil)")}
-
-<i>⚠️ = o anúncio não informa salário dentro do mínimo; confira antes de se candidatar. Busca na web · ≈ US$ ${usd.toFixed(2)}</i>`;
-}
-
 export function topicButtons(n: number): InlineButton[][] {
-  const buttons = Array.from({ length: n }, (_, i) => ({ text: `🎠 ${i + 1}`, data: `tp:${i}` }));
+  const buttons = Array.from({ length: n }, (_, i) => ({ text: `📌 ${i + 1}`, data: `tp:${i}` }));
   const rows: InlineButton[][] = [];
   for (let i = 0; i < buttons.length; i += 4) rows.push(buttons.slice(i, i + 4));
   return rows;
 }
 
-export function carouselButtons(id: number): InlineButton[][] {
+export function postButtons(id: number): InlineButton[][] {
   return [
     [
       { text: "✅ Aprovar", data: `ca:${id}` },
@@ -460,9 +377,6 @@ export class Bot {
         case "conectar":
           await this.sendConnect(chatId);
           return;
-        case "vagas":
-          await this.schedule({ kind: "jobs", chatId }, "💼 Procurando vagas que combinam com o seu currículo (Brasil e exterior)… chegam em 2–3 minutos.");
-          return;
         case "temas":
           await this.schedule({ kind: "topics", chatId }, "🔎 Procurando o que está em alta em software, front-end e IA… os temas chegam em 1–2 minutos.");
           return;
@@ -470,18 +384,14 @@ export class Bot {
           await this.sendAgenda(chatId);
           return;
         case "post":
-          if (arg) await this.requestCarousel(chatId, arg, undefined, undefined, "post");
+          if (arg) await this.requestPost(chatId, arg);
           else {
             await this.setAwaiting({ type: "post_topic" });
             await messenger.send(chatId, "Qual o tema do post de imagem? Ex.: <i>boas práticas de micro-interações</i>. 📌");
           }
           return;
         case "carrossel":
-          if (arg) await this.requestCarousel(chatId, arg);
-          else {
-            await this.setAwaiting({ type: "carousel_topic" });
-            await messenger.send(chatId, "Qual o tema do carrossel? Mande na próxima mensagem. 🎠");
-          }
+          await messenger.send(chatId, "O bot não faz mais carrosséis: o post de imagem rendeu mais. Use <code>/post</code> e o tema. 📌");
           return;
         case "ajuda":
         case "help":
@@ -538,18 +448,15 @@ export class Bot {
           if (post) await this.publishComment(chatId, post, text);
           return;
         }
-        case "carousel_topic":
-          await this.requestCarousel(chatId, text);
-          return;
         case "post_topic":
-          await this.requestCarousel(chatId, text, undefined, undefined, "post");
+          await this.requestPost(chatId, text);
           return;
-        case "carousel_image":
-          await this.schedule({ kind: "image", chatId, carouselId: awaiting.carouselId, scene: text }, "🖼️ Gerando a imagem com essa cena… a prévia chega em até 1 minuto.");
+        case "post_image":
+          await this.schedule({ kind: "image", chatId, draftId: awaiting.draftId, scene: text }, "🖼️ Gerando a imagem com essa cena… a prévia chega em até 1 minuto.");
           return;
-        case "carousel_adjust": {
-          const prev = await store.getCarousel(awaiting.carouselId);
-          if (prev) await this.requestCarousel(chatId, prev.topic, prev.id, text, formatOf(prev));
+        case "post_adjust": {
+          const prev = await store.getDraft(awaiting.draftId);
+          if (prev) await this.requestPost(chatId, prev.topic, prev.id, text);
           return;
         }
         case "invites": {
@@ -754,7 +661,7 @@ export class Bot {
   /** No webhook, vai para a fila (e avisa); no cron e nos testes, roda na hora. */
   private async schedule(job: Job, notice: string) {
     const chatId = await this.ownerChat();
-    if (SEARCH_JOBS.has(job.kind) && (await this.blockedByBudget(chatId))) return;
+    if (PAUSED_AT_CAP.has(job.kind) && (await this.blockedByBudget(chatId))) return;
     if (chatId !== null) await this.deps.messenger.send(chatId, notice);
     if (this.deps.defer) await this.deps.defer(job);
     else await this.runJob(job);
@@ -772,61 +679,53 @@ export class Bot {
     switch (job.kind) {
       case "daily":
         return this.runDaily();
-      case "carousel":
       case "post": {
-        const prev = job.previousId ? await this.deps.store.getCarousel(job.previousId) : null;
-        return this.createCarousel(job.chatId, job.topic, prev ?? undefined, job.instructions, job.kind);
+        const prev = job.previousId ? await this.deps.store.getDraft(job.previousId) : null;
+        return this.createPost(job.chatId, job.topic, prev ?? undefined, job.instructions);
       }
       case "topics":
         return this.sendTopics(job.chatId);
-      case "jobs":
-        return this.sendJobs(job.chatId);
       case "image":
-        return this.regenerateImage(job.chatId, job.carouselId, job.scene);
+        return this.regenerateImage(job.chatId, job.draftId, job.scene);
     }
   }
 
-  private requestCarousel(chatId: number, topic: string, previousId?: number, instructions?: string, format: PostFormat = "carousel") {
-    const notice =
-      format === "post"
-        ? `📌 Montando o post de imagem sobre <b>${esc(topic)}</b>… a prévia chega em até 1 minuto.`
-        : `🎨 Montando o carrossel sobre <b>${esc(topic)}</b>… a prévia chega em 1–2 minutos.`;
-    return this.schedule({ kind: format, chatId, topic, previousId, instructions }, notice);
+  private requestPost(chatId: number, topic: string, previousId?: number, instructions?: string) {
+    return this.schedule({ kind: "post", chatId, topic, previousId, instructions }, `📌 Montando o post de imagem sobre <b>${esc(topic)}</b>… a prévia chega em até 1 minuto.`);
   }
 
-  // ---------- carrossel ----------
+  // ---------- post de imagem ----------
 
-  private async createCarousel(chatId: number, topic: string, previous?: Carousel, instructions?: string, format: PostFormat = "carousel") {
+  private async createPost(chatId: number, topic: string, previous?: PostDraft, instructions?: string) {
     const { messenger, drafter } = this.deps;
     try {
-      const content: CarouselContent =
-        format === "post" ? await drafter.draftImagePost(topic, previous?.content, instructions) : await drafter.draftCarousel(topic, previous?.content, instructions);
+      const content: PostContent = await drafter.draftImagePost(topic, previous?.content, instructions);
       // Ajuste reaproveita a ilustração; tema novo ou "Refazer" gera outra
       const keep = instructions ? previous?.content.capa_imagem : undefined;
       const art = keep ?? (content.imagem_prompt && this.deps.illustrator ? await this.deps.illustrator.generate(content.imagem_prompt) : null);
       if (art) content.capa_imagem = art;
       await this.sendNewVersion(chatId, topic, content, previous);
     } catch (err) {
-      await messenger.send(chatId, `⚠️ Não consegui montar o ${FORMAT_NAME[format]}: ${esc(String((err as Error).message))}`);
+      await messenger.send(chatId, `⚠️ Não consegui montar o post: ${esc(String((err as Error).message))}`);
     }
   }
 
   /** Salva a nova versão, descarta o rascunho anterior e manda a prévia com o cartão. */
-  private async sendNewVersion(chatId: number, topic: string, content: CarouselContent, previous?: Carousel) {
+  private async sendNewVersion(chatId: number, topic: string, content: PostContent, previous?: PostDraft) {
     const { messenger, renderer, store } = this.deps;
-    const rendered = await renderer.render(content);
-    const id = await store.addCarousel({ topic, content, createdAt: this.iso() });
-    if (previous && previous.status === "draft") await store.updateCarousel(previous.id, { status: "discarded" });
-    const carousel = (await store.getCarousel(id))!;
-    await messenger.sendPhotos(chatId, rendered.images);
-    await messenger.send(chatId, carouselCard(carousel, await this.nextSlotLabel(formatOf(carousel))), carouselButtons(id));
+    const image = await renderer.render(content);
+    const id = await store.addDraft({ topic, content, createdAt: this.iso() });
+    if (previous && previous.status === "draft") await store.updateDraft(previous.id, { status: "discarded" });
+    const draft = (await store.getDraft(id))!;
+    await messenger.sendPhotos(chatId, [image]);
+    await messenger.send(chatId, postCard(draft, await this.nextSlotLabel()), postButtons(id));
   }
 
-  /** Só troca a ilustração da capa: o texto e os gráficos ficam iguais. */
-  private async regenerateImage(chatId: number, carouselId: number, scene?: string) {
+  /** Só troca a ilustração: o texto da arte fica igual. */
+  private async regenerateImage(chatId: number, draftId: number, scene?: string) {
     const { messenger, store, drafter, illustrator } = this.deps;
-    const prev = await store.getCarousel(carouselId);
-    if (!prev || prev.status !== "draft") {
+    const prev = await store.getDraft(draftId);
+    if (!prev || prev.status !== "draft" || !prev.content.imagem) {
       await messenger.send(chatId, "Esse rascunho já foi decidido; a imagem não pode mais mudar.");
       return;
     }
@@ -851,39 +750,38 @@ export class Bot {
     }
   }
 
-  private async onCarouselButton(action: string, id: number, chatId: number, messageId: number, callbackId: string) {
+  /** Botões do cartão (os prefixos "c…" vêm do tempo do carrossel: cartões antigos continuam funcionando). */
+  private async onPostButton(action: string, id: number, chatId: number, messageId: number, callbackId: string) {
     const { messenger, store } = this.deps;
-    const c = await store.getCarousel(id);
+    const c = await store.getDraft(id);
     if (!c) {
       await messenger.answerCallback(callbackId, "Rascunho não encontrado.");
       return;
     }
-    if (c.status !== "draft" && action !== "cx") {
+    if ((c.status !== "draft" || !c.content.imagem) && action !== "cx") {
       await messenger.answerCallback(callbackId, "Esse rascunho já foi decidido.");
       return;
     }
-    const format = formatOf(c);
-    const when = await this.nextSlotLabel(format);
+    const when = await this.nextSlotLabel();
     switch (action) {
       case "ca": {
         await messenger.answerCallback(callbackId, "Agendado!");
-        const queue = (await store.listCarousels(["approved"])).filter((q) => formatOf(q) === format);
-        const slot = nextFreeSlot(this.deps.now(), queue.map((q) => q.scheduled_for), format);
-        await store.updateCarousel(id, { status: "approved", scheduled_for: slot });
+        const queue = await this.approvedPosts();
+        const slot = nextFreeSlot(this.deps.now(), queue.map((q) => q.scheduled_for));
+        await store.updateDraft(id, { status: "approved", scheduled_for: slot });
         const label = slotLabel(slot, this.deps.now());
-        const plural = format === "post" ? "posts" : "carrosséis";
-        const note = queue.length ? `\n<i>${queue.length === 1 ? `Já há 1 ${FORMAT_NAME[format]}` : `Já há ${queue.length} ${plural}`} na fila antes dele. Veja em /agenda.</i>` : "";
-        await messenger.edit(chatId, messageId, `${carouselCard(c, label)}\n\n✅ <b>Agendado: ${label}.</b>${note}`);
+        const note = queue.length ? `\n<i>${queue.length === 1 ? "Já há 1 post" : `Já há ${queue.length} posts`} na fila antes dele. Veja em /agenda.</i>` : "";
+        await messenger.edit(chatId, messageId, `${postCard(c, label)}\n\n✅ <b>Agendado: ${label}.</b>${note}`);
         return;
       }
       case "cr":
         await messenger.answerCallback(callbackId, "Refazendo…");
-        await messenger.edit(chatId, messageId, `${carouselCard(c, when)}\n\n🔄 <i>Refeito abaixo.</i>`);
-        await this.requestCarousel(chatId, c.topic, c.id, undefined, format);
+        await messenger.edit(chatId, messageId, `${postCard(c, when)}\n\n🔄 <i>Refeito abaixo.</i>`);
+        await this.requestPost(chatId, c.topic, c.id);
         return;
       case "ci":
         await messenger.answerCallback(callbackId);
-        await this.setAwaiting({ type: "carousel_image", carouselId: id });
+        await this.setAwaiting({ type: "post_image", draftId: id });
         await messenger.send(
           chatId,
           "🖼️ Descreva a cena da ilustração (pode ser em português), por exemplo: <i>uma pessoa olhando o relógio enquanto a página carrega</i>.\nOu gere outra com a mesma ideia:",
@@ -893,46 +791,41 @@ export class Bot {
       case "cn":
         await messenger.answerCallback(callbackId, "Gerando…");
         await this.setAwaiting(null);
-        await this.schedule({ kind: "image", chatId, carouselId: id }, "🖼️ Gerando outra imagem… a prévia chega em até 1 minuto.");
+        await this.schedule({ kind: "image", chatId, draftId: id }, "🖼️ Gerando outra imagem… a prévia chega em até 1 minuto.");
         return;
       case "cj":
         await messenger.answerCallback(callbackId);
-        await this.setAwaiting({ type: "carousel_adjust", carouselId: id });
-        await messenger.send(
-          chatId,
-          format === "post"
-            ? "O que mudar? Ex.: <i>use o modelo errado × certo</i> ou <i>troque o passo 4 por acessibilidade</i>. ✏️"
-            : "O que mudar? Ex.: <i>deixe o slide 3 mais técnico e troque o título da capa</i>. ✏️",
-        );
+        await this.setAwaiting({ type: "post_adjust", draftId: id });
+        await messenger.send(chatId, "O que mudar? Ex.: <i>use o modelo errado × certo</i> ou <i>troque o passo 4 por acessibilidade</i>. ✏️");
         return;
       case "cx":
         await messenger.answerCallback(callbackId, "Descartado");
-        await store.updateCarousel(id, { status: "discarded" });
-        await messenger.edit(chatId, messageId, `${carouselCard(c, when)}\n\n❌ <i>Descartado</i>`);
+        await store.updateDraft(id, { status: "discarded" });
+        await messenger.edit(chatId, messageId, `${postCard(c, when)}\n\n❌ <i>Descartado</i>`);
         return;
       default:
         await messenger.answerCallback(callbackId);
     }
   }
 
-  private async nextSlotLabel(format: PostFormat): Promise<string> {
-    const queue = (await this.deps.store.listCarousels(["approved"])).filter((q) => formatOf(q) === format);
-    return nextPublishLabel(this.deps.now(), queue.map((q) => q.scheduled_for), format);
+  /** Posts aprovados na fila (carrosséis antigos que sobraram ficam de fora). */
+  private async approvedPosts(): Promise<PostDraft[]> {
+    return (await this.deps.store.listDrafts(["approved"])).filter((q) => q.content.imagem);
   }
 
-  /** /agenda: posts e carrosséis aprovados, por data. */
+  private async nextSlotLabel(): Promise<string> {
+    return nextPublishLabel(this.deps.now(), (await this.approvedPosts()).map((q) => q.scheduled_for));
+  }
+
+  /** /agenda: posts aprovados, por data. */
   private async sendAgenda(chatId: number) {
-    const queue = (await this.deps.store.listCarousels(["approved"])).sort((a, b) => (a.scheduled_for ?? "").localeCompare(b.scheduled_for ?? ""));
+    const queue = (await this.approvedPosts()).sort((a, b) => (a.scheduled_for ?? "").localeCompare(b.scheduled_for ?? ""));
     if (queue.length === 0) {
-      await this.deps.messenger.send(chatId, "📅 Nada agendado. Mande <code>/post</code> ou <code>/carrossel</code> e o tema.");
+      await this.deps.messenger.send(chatId, "📅 Nada agendado. Mande <code>/post</code> e o tema.");
       return;
     }
-    const lines = queue.map((q) => {
-      const f = formatOf(q);
-      const when = q.scheduled_for ? slotLabel(q.scheduled_for, this.deps.now()) : `próxima ${dayName(f)}`;
-      return `• ${when} — ${f === "post" ? "📌" : "🎠"} ${esc(q.content.titulo.replace(/\*\*/g, ""))}`;
-    });
-    await this.deps.messenger.send(chatId, `📅 <b>Agendados</b>\n\n${lines.join("\n")}\n\n<i>📌 post de imagem · 🎠 carrossel. Para tirar um da fila, toque em ❌ Descartar no cartão dele.</i>`);
+    const lines = queue.map((q) => `• ${q.scheduled_for ? slotLabel(q.scheduled_for, this.deps.now()) : `próxima ${PUBLISH_DAY}`} — ${esc(q.content.titulo.replace(/\*\*/g, ""))}`);
+    await this.deps.messenger.send(chatId, `📅 <b>Posts agendados</b>\n\n${lines.join("\n")}\n\n<i>Para tirar um da fila, toque em ❌ Descartar no cartão dele.</i>`);
   }
 
   // ---------- custos ----------
@@ -954,7 +847,7 @@ export class Bot {
     if (chatId !== null) {
       await this.deps.messenger.send(
         chatId,
-        `⛔ <b>Teto do mês atingido:</b> ${usd(spent)} de ${usd(cap)}.\nPausei carrossel, /temas e /vagas até ${nextMonthLabel(this.deps.now())}. Comentários e post de imagem continuam.\nPara aumentar: <code>/custos teto ${Math.ceil(cap * 1.5)}</code>`,
+        `⛔ <b>Teto do mês atingido:</b> ${usd(spent)} de ${usd(cap)}.\nPausei /post e /temas até ${nextMonthLabel(this.deps.now())}. Os comentários continuam.\nPara aumentar: <code>/custos teto ${Math.ceil(cap * 1.5)}</code>`,
       );
     }
     return true;
@@ -971,7 +864,7 @@ export class Bot {
     await this.deps.store.setSetting("budget_warned", month);
     await this.deps.messenger.send(
       chatId,
-      `⚠️ <b>Gasto do mês com o Claude:</b> ${usd(spent)} de ${usd(cap)} (${Math.round((spent / cap) * 100)}%).\nAo chegar no teto, carrossel, /temas e /vagas param até ${nextMonthLabel(this.deps.now())}. Detalhes em /custos.`,
+      `⚠️ <b>Gasto do mês com o Claude:</b> ${usd(spent)} de ${usd(cap)} (${Math.round((spent / cap) * 100)}%).\nAo chegar no teto, /post e /temas param até ${nextMonthLabel(this.deps.now())}. Detalhes em /custos.`,
     );
   }
 
@@ -997,7 +890,7 @@ ${"▰".repeat(bar)}${"▱".repeat(10 - bar)} ${Math.round((spent / cap) * 100)}
 
 ${lines.length ? `<b>No mês, por tipo:</b>\n${lines.join("\n")}` : "<i>Nenhum gasto registrado neste mês.</i>"}
 
-<i>Estimativa pelo uso de tokens e buscas de cada chamada, a partir de quando o /custos entrou no ar. O valor oficial está no Console da Anthropic (Usage). Ao chegar no teto, carrossel, /temas e /vagas param até o mês seguinte. Para mudar: <code>/custos teto 8</code>.</i>`,
+<i>Estimativa pelo uso de tokens e buscas de cada chamada, a partir de quando o /custos entrou no ar. O valor oficial está no Console da Anthropic (Usage). Ao chegar no teto, /post e /temas param até o mês seguinte. Para mudar: <code>/custos teto 8</code>.</i>`,
     );
   }
 
@@ -1023,32 +916,6 @@ Versão: <code>${esc(this.deps.version ?? "desconhecida")}</code>
 Fila: ${queue}
 Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · ${counts.failed ?? 0} com erro · ${counts.done ?? 0} feitos`,
     );
-  }
-
-  // ---------- /vagas ----------
-
-  /** Sábado, 10h (ou /vagas): 5 vagas no Brasil e 5 no exterior, sem repetir as já enviadas. */
-  async sendJobs(chatId: number): Promise<void> {
-    const { drafter, store, messenger } = this.deps;
-    if (await this.blockedByBudget(chatId)) return;
-    const sent = JSON.parse((await store.getSetting("jobs_sent")) ?? "[]") as string[];
-    let found;
-    try {
-      found = await drafter.findJobs(sent);
-    } catch (err) {
-      await messenger.send(chatId, `⚠️ Não consegui buscar as vagas: ${esc(String((err as Error).message))}`);
-      return;
-    }
-    const rejects: JobRejects = { plataforma: 0, fora_da_busca: 0, ja_enviada: 0, incompleta: 0 };
-    const jobs = selectJobs(found.items, found.links, sent, urlKey, rejects);
-    console.log("vagas filtradas", { sugeridas: found.items.length, mantidas: jobs.length, ...rejects });
-    if (jobs.length === 0) {
-      await messenger.send(chatId, `Não achei vagas novas desta vez. ${rejectsLine(found.items.length, found.links.size, rejects)}\n\nTente /vagas de novo mais tarde.`);
-      return;
-    }
-    const keys = jobs.map((j) => urlKey(j.url)).filter((k): k is string => Boolean(k));
-    await store.setSetting("jobs_sent", JSON.stringify([...sent, ...keys].slice(-SENT_MEMORY)));
-    await messenger.send(chatId, jobsMessage(jobs, found.custo.usd));
   }
 
   // ---------- /temas ----------
@@ -1081,76 +948,56 @@ Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · $
       await this.deps.messenger.answerCallback(callbackId, "Essa lista expirou. Mande /temas de novo.");
       return;
     }
-    await this.deps.messenger.answerCallback(callbackId, "Montando o carrossel…");
-    await this.requestCarousel(chatId, topic.gancho ? `${topic.titulo} — ${topic.gancho}` : topic.titulo);
+    await this.deps.messenger.answerCallback(callbackId, "Montando o post…");
+    await this.requestPost(chatId, topic.gancho ? `${topic.titulo} — ${topic.gancho}` : topic.titulo);
   }
 
-  /**
-   * 8h30 de terça e quinta (cron próprio): publica o do dia (post de imagem na terça,
-   * carrossel na quinta). Sem `format`, decide pelo dia da semana.
-   */
-  async publishCarousel(format: PostFormat | null = formatForWeekday(brWeekday(this.deps.now()))): Promise<void> {
+  /** Terça, 8h30 (cron próprio): publica o post agendado para hoje. */
+  async publishPost(): Promise<void> {
     const { store, messenger, renderer, linkedin } = this.deps;
     const chatId = await this.ownerChat();
-    if (chatId === null || !format) return;
-    const name = FORMAT_NAME[format];
-    // Sai o agendado para hoje (ou um atrasado, se um dia de publicação passou sem publicar); os outros esperam a vez
+    if (chatId === null) return;
+    // Sai o agendado para hoje (ou um atrasado, se uma terça passou sem publicar); os outros esperam a vez
     const today = brDate(this.deps.now());
-    const queue = (await store.listCarousels(["approved"])).filter((q) => formatOf(q) === format);
+    const queue = await this.approvedPosts();
     const c = queue
       .filter((q) => !q.scheduled_for || q.scheduled_for <= today)
       .sort((a, b) => (a.scheduled_for ?? "").localeCompare(b.scheduled_for ?? ""))[0];
     if (!c) {
       const next = queue.filter((q) => q.scheduled_for).sort((a, b) => a.scheduled_for!.localeCompare(b.scheduled_for!))[0];
       const tail = next ? ` O próximo sai ${slotLabel(next.scheduled_for!, this.deps.now())}.` : "";
-      const day = dayName(format);
-      await messenger.send(chatId, `${format === "post" ? "📌" : "🎠"} ${day[0].toUpperCase()}${day.slice(1)}, ${PUBLISH_TIME}: não havia ${name} agendado para hoje, então nada foi publicado.${tail}`);
+      await messenger.send(chatId, `📌 ${PUBLISH_DAY[0].toUpperCase()}${PUBLISH_DAY.slice(1)}, ${PUBLISH_TIME}: não havia post agendado para hoje, então nada foi publicado.${tail}`);
       return;
     }
 
-    let rendered;
+    let image: Uint8Array | undefined;
     try {
-      rendered = await renderer.render(c.content);
-      // O **destaque** vira cor no slide; no título do documento do LinkedIn sairia com os asteriscos
-      const title = c.content.titulo.replace(/\*\*/g, "");
-      const url =
-        format === "post"
-          ? await linkedin.publishImage(rendered.images[0], title, c.content.legenda)
-          : await linkedin.publishCarousel(rendered, title, c.content.legenda);
-      await store.updateCarousel(c.id, { status: "published", published_at: this.iso(), post_url: url });
+      image = await renderer.render(c.content);
+      // O **destaque** vira cor na arte; no texto alternativo sairia com os asteriscos
+      const url = await linkedin.publishImage(image, c.content.titulo.replace(/\*\*/g, ""), c.content.legenda);
+      await store.updateDraft(c.id, { status: "published", published_at: this.iso(), post_url: url });
       await store.logAction("post", c.id, this.iso());
-      await messenger.send(chatId, `🚀 <b>${format === "post" ? "Post publicado" : "Carrossel publicado"}!</b> · ${esc(c.topic)}\n\n🔗 ${esc(url)}`);
+      await messenger.send(chatId, `🚀 <b>Post publicado!</b> · ${esc(c.topic)}\n\n🔗 ${esc(url)}`);
     } catch (err) {
-      await store.updateCarousel(c.id, { status: "failed" });
-      await messenger.send(chatId, `⚠️ Não consegui publicar o ${name}: ${esc(String((err as Error).message))}`);
-      if (rendered && format === "post") {
-        await messenger.sendPhotos(chatId, rendered.images);
+      await store.updateDraft(c.id, { status: "failed" });
+      await messenger.send(chatId, `⚠️ Não consegui publicar o post: ${esc(String((err as Error).message))}`);
+      if (image) {
+        await messenger.sendPhotos(chatId, [image]);
         await messenger.send(chatId, "Para publicar à mão: salve a imagem acima, comece um post no LinkedIn com ela e cole a legenda abaixo.");
-        await messenger.send(chatId, `<code>${esc(c.content.legenda)}</code>`);
-      } else if (rendered) {
-        await messenger.sendDocument(
-          chatId,
-          rendered.pdf,
-          "carrossel.pdf",
-          "Para publicar à mão: no LinkedIn, comece um post, toque em ➕ → Documento, envie este PDF e cole a legenda abaixo.",
-        );
         await messenger.send(chatId, `<code>${esc(c.content.legenda)}</code>`);
       }
     }
   }
 
-  /** Véspera da publicação, 18h: lembra do post ou do carrossel se nenhum estiver aprovado. */
-  async remindCarousel(format: PostFormat = "carousel"): Promise<void> {
+  /** Segunda, 18h (véspera): lembra do post se nenhum estiver aprovado. */
+  async remindPost(): Promise<void> {
     const chatId = await this.ownerChat();
     if (chatId === null) return;
     const tomorrow = addDays(brDate(this.deps.now()), 1);
-    const queue = (await this.deps.store.listCarousels(["approved"])).filter((q) => formatOf(q) === format);
-    if (queue.some((q) => !q.scheduled_for || q.scheduled_for <= tomorrow)) return;
-    const what = format === "post" ? "o post de imagem" : "o carrossel";
-    const cmd = format === "post" ? "/post" : "/carrossel";
+    if ((await this.approvedPosts()).some((q) => !q.scheduled_for || q.scheduled_for <= tomorrow)) return;
     await this.deps.messenger.send(
       chatId,
-      `📅 Amanhã às ${PUBLISH_TIME} sai ${what} da semana, mas nenhum está aprovado ainda.\nQual o tema? Mande <code>${cmd}</code> e o tema.`,
+      `📅 Amanhã às ${PUBLISH_TIME} sai o post de imagem da semana, mas nenhum está aprovado ainda.\nQual o tema? Mande <code>/post</code> e o tema (ou /temas para ideias).`,
     );
   }
 
@@ -1213,7 +1060,7 @@ Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · $
       return;
     }
     if (action === "tp") return this.onTopicChosen(id, chatId, cb.id);
-    if (action.startsWith("c")) return this.onCarouselButton(action, id, chatId, messageId, cb.id);
+    if (action.startsWith("c")) return this.onPostButton(action, id, chatId, messageId, cb.id);
 
     const post = await store.getPost(id);
     if (!post) {
@@ -1273,13 +1120,11 @@ Pedidos: ${counts.pending ?? 0} esperando · ${counts.running ?? 0} rodando · $
 
   // ---------- agendamentos ----------
 
-  /** Cron das 18h (Brasília): comentários todo dia, lembrete na véspera do post e do carrossel, resumo no domingo. */
+  /** Cron das 18h (Brasília): comentários todo dia, lembrete na véspera do post, resumo no domingo. */
   async runScheduled(): Promise<void> {
     const day = brWeekday(this.deps.now());
     await this.runDaily();
-    for (const f of Object.keys(PUBLISH_WEEKDAYS) as PostFormat[]) {
-      if (day === (PUBLISH_WEEKDAYS[f] + 6) % 7) await this.remindCarousel(f);
-    }
+    if (day === (PUBLISH_WEEKDAY + 6) % 7) await this.remindPost();
     if (day === 0) {
       const chatId = await this.ownerChat();
       if (chatId !== null) await this.sendWeek(chatId, true);
