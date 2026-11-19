@@ -1,6 +1,6 @@
 import type { BrowserWorker } from "@cloudflare/puppeteer";
 import { Bot } from "./bot";
-import { BrowserRenderer } from "./carousel";
+import { BrowserRenderer } from "./render";
 import { ClaudeDrafter } from "./claude";
 import { FluxIllustrator } from "./illustrator";
 import { CRONS } from "./crons";
@@ -14,7 +14,7 @@ import { TelegramMessenger, webhookSecret, type TgUpdate } from "./telegram";
 export interface Env {
   DB: D1Database;
   BROWSER: BrowserWorker;
-  /** Workers AI: ilustração da capa (Flux). */
+  /** Workers AI: ilustração do post (Flux). */
   AI: Ai;
   TELEGRAM_BOT_TOKEN: string;
   ANTHROPIC_API_KEY: string;
@@ -43,7 +43,7 @@ function makeBot(env: Env, web = false) {
     {
       store,
       messenger: new TelegramMessenger(env.TELEGRAM_BOT_TOKEN),
-      drafter: new ClaudeDrafter(env.ANTHROPIC_API_KEY, perfil),
+      drafter: new ClaudeDrafter(env.ANTHROPIC_API_KEY, perfil, (kind, cost) => store.addCost(kind, cost.usd, now().toISOString())),
       renderer: new BrowserRenderer(env.BROWSER),
       linkedin: makeLinkedIn(env, store),
       fetchPreview,
@@ -66,11 +66,9 @@ function page(title: string, text: string, status = 200) {
 
 const JOB_LABEL: Record<string, string> = {
   daily: "Gerar as sugestões de comentário",
-  carousel: "Montar o carrossel",
   post: "Montar o post de imagem",
   topics: "A busca de temas",
-  jobs: "A busca de vagas",
-  image: "Trocar a imagem do carrossel",
+  image: "Trocar a ilustração do post",
 };
 
 /** Roda algo agendado e, se der erro, avisa no Telegram em vez de só gravar no log. */
@@ -171,18 +169,9 @@ export default {
     if (controller.cron === CRONS.daily) {
       ctx.waitUntil(guarded(env, "A rodada das 18h", (bot) => bot.runScheduled()));
     }
-    // 11:30 UTC de terça e quinta = 8h30 em Brasília: post de imagem (terça) e carrossel (quinta)
+    // 11:30 UTC de terça = 8h30 em Brasília: post de imagem da semana
     if (controller.cron === CRONS.publish) {
-      ctx.waitUntil(guarded(env, "A publicação da semana", (bot) => bot.publishCarousel()));
-    }
-    // 13:00 UTC de sábado = 10h em Brasília: vagas da semana
-    if (controller.cron === CRONS.jobs) {
-      ctx.waitUntil(
-        guarded(env, "As vagas de sábado", async (bot) => {
-          const chatId = await bot.ownerChat();
-          if (chatId !== null) await bot.sendJobs(chatId);
-        }),
-      );
+      ctx.waitUntil(guarded(env, "A publicação do post", (bot) => bot.publishPost()));
     }
     // A cada minuto: roda os trabalhos longos pedidos pelo Telegram (até 15 min aqui, contra ~30 s no webhook)
     if (controller.cron === CRONS.queue) {

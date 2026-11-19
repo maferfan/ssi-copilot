@@ -46,7 +46,7 @@ const pointsOf = (p: PostTextParts | undefined) => (p?.pontos ?? []).map(clean).
 
 /**
  * Título em negrito, gancho (o que aparece antes do "…ver mais"), pontos em lista,
- * conclusão, pergunta para puxar comentários, aviso das fontes e hashtags.
+ * conclusão, pergunta para puxar comentários e hashtags.
  * Com `pt`, o post sai nas duas línguas: português primeiro (a rede é brasileira), depois inglês.
  */
 export function buildCaption(en: PostParts, pt?: PostTextParts): string {
@@ -63,7 +63,6 @@ export function buildCaption(en: PostParts, pt?: PostTextParts): string {
       bilingual ? block(pt!, ptPts, "🇧🇷 ") : "",
       bilingual ? "— — —" : "",
       block(en, enPts, bilingual ? "🇺🇸 " : ""),
-      bilingual ? "📊 Fontes em cada gráfico · Sources are cited under each chart." : "📊 Sources are cited under each chart.",
       tags.join(" "),
     ]
       .filter(Boolean)

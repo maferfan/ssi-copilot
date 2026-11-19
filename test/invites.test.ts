@@ -92,22 +92,22 @@ describe("/convites", () => {
 });
 
 describe("fila de trabalhos longos (webhook)", () => {
-  it("no webhook, /carrossel vai para a fila e avisa; o cron roda depois", async () => {
+  it("no webhook, /post vai para a fila e avisa; o cron roda depois", async () => {
     const ctx = makeDeps({ now: () => new Date("2026-11-08T11:00:00Z") });
     ctx.deps.defer = (job) => ctx.store.enqueueJob(job);
     const bot = new Bot(ctx.deps, perfil);
     await bot.handleUpdate(msg("/start"));
-    await bot.handleUpdate(msg("/carrossel performance web"));
-    expect(ctx.drafter.carouselCalls).toHaveLength(0);
-    expect(ctx.store.jobs.map((j) => j.job.kind)).toEqual(["carousel"]);
-    expect(ctx.messenger.last().html).toContain("a prévia chega em 1–2 minutos");
+    await bot.handleUpdate(msg("/post performance web"));
+    expect(ctx.drafter.postCalls).toHaveLength(0);
+    expect(ctx.store.jobs.map((j) => j.job.kind)).toEqual(["post"]);
+    expect(ctx.messenger.last().html).toContain("a prévia chega em até 1 minuto");
 
     const cron = new Bot({ ...ctx.deps, defer: undefined }, perfil);
     for (const { id, job } of await ctx.store.takeJobs(3)) {
       await cron.runJob(job);
       await ctx.store.finishJob(id, true);
     }
-    expect(ctx.drafter.carouselCalls[0].topic).toBe("performance web");
+    expect(ctx.drafter.postCalls[0].topic).toBe("performance web");
   });
 
   it("um trabalho antigo de um tipo que não existe mais é ignorado sem erro", async () => {

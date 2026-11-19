@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { Bot, topicButtons } from "../src/bot";
-import { carouselHtml, HEIGHT, normalizeCarousel, WIDTH } from "../src/carousel";
 import { parseJsonArray, topicsPrompt, verifyTopics } from "../src/claude";
 import { perfil } from "../src/perfil";
 import type { TopicIdea } from "../src/types";
-import { click, makeDeps, msg, sampleCarousel } from "./fakes";
+import { click, makeDeps, msg } from "./fakes";
 
 async function setup() {
   const ctx = makeDeps({ now: () => new Date("2026-11-09T14:00:00Z") });
@@ -37,11 +36,11 @@ describe("/temas", () => {
     expect(JSON.parse((await store.getSetting("topics"))!)).toHaveLength(2);
   });
 
-  it("tocar num tema monta o carrossel com o título e o gancho", async () => {
+  it("tocar num tema monta o post de imagem com o título e o gancho", async () => {
     const { bot, drafter } = await setup();
     await bot.handleUpdate(msg("/temas"));
     await bot.handleUpdate(click("tp:1"));
-    expect(drafter.carouselCalls[0].topic).toBe("Evals before prompts — Your prompt is not the problem.");
+    expect(drafter.postCalls[0].topic).toBe("Evals before prompts — Your prompt is not the problem.");
   });
 
   it("lista expirada ou vazia avisa", async () => {
@@ -109,20 +108,5 @@ describe("verifyTopics", () => {
     expect(p).toContain("in Brazilian Portuguese");
     expect(p).toContain("at least one per area");
     expect(p).toContain("no comments about your search");
-  });
-});
-
-describe("formato dos slides", () => {
-  it("16:9, com texto e gráfico lado a lado", () => {
-    expect([WIDTH, HEIGHT]).toEqual([1920, 1080]);
-    const html = carouselHtml(
-      normalizeCarousel({
-        ...sampleCarousel(),
-        capa_grafico: { tipo: "bar", titulo: "x", unidade: "%", dados: [{ label: "a", valor: 1 }, { label: "b", valor: 2 }], fonte: null, ilustrativo: true },
-      }),
-    );
-    expect(html).toContain("@page { size: 1920px 1080px");
-    expect(html).toContain('<div class="col-text">');
-    expect(html).toContain('<div class="col-chart">');
   });
 });

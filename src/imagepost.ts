@@ -1,8 +1,8 @@
 import type { Perfil } from "./perfil";
-import type { CarouselContent, ImagePost } from "./types";
+import type { PostContent, ImagePost } from "./types";
 
 /**
- * Post de terça: uma imagem só, no estilo infográfico (passo a passo ou errado × certo).
+ * Post da semana (terça): uma imagem só, no estilo infográfico (passo a passo ou errado × certo).
  * O Claude escreve o conteúdo e escolhe o modelo; o código desenha a arte (as IAs de imagem
  * erram letras), e o Flux gera uma ilustração que entra nela.
  */
@@ -13,10 +13,6 @@ export const POST_HEIGHT = 1350;
 
 export const STEPS = { min: 3, max: 6 };
 export const COMPARE_ITEMS = { min: 2, max: 4 };
-
-export function isImagePost(c: CarouselContent): boolean {
-  return Boolean(c.imagem);
-}
 
 // ---------- pedido ao Claude ----------
 
@@ -96,7 +92,7 @@ export const IMAGE_POST_SCHEMA = {
   },
 } as const;
 
-export function imagePostUserPrompt(topic: string, previous?: CarouselContent, instructions?: string): string {
+export function imagePostUserPrompt(topic: string, previous?: PostContent, instructions?: string): string {
   const prev = previous?.imagem
     ? `\n\nCurrent version:\n${JSON.stringify({ titulo: previous.titulo, subtitulo: previous.subtitulo, ...previous.imagem, legenda: previous.legenda }, null, 2)}`
     : "";
@@ -169,9 +165,11 @@ function compareHtml(ruim: ImagePost["ruim"], bom: ImagePost["bom"]): string {
 }
 
 /** Uma página só, no visual do matheusferrazzadev.com (fundo grafite, destaque dourado). */
-export function imagePostHtml(c: CarouselContent): string {
+export function imagePostHtml(c: PostContent): string {
   const img = c.imagem!;
-  const art = c.capa_imagem ? `<img class="art" src="${c.capa_imagem}" alt="">` : "";
+  // Só imagem embutida (a do Flux); um link externo nunca entra na arte
+  const hasArt = Boolean(c.capa_imagem?.startsWith("data:image/"));
+  const art = hasArt ? `<img class="art" src="${esc(c.capa_imagem!)}" alt="">` : "";
   const body = img.layout === "steps" ? stepsHtml(img.passos) : compareHtml(img.ruim, img.bom);
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -189,7 +187,7 @@ export function imagePostHtml(c: CarouselContent): string {
   .mono { font-family: "JetBrains Mono", monospace; letter-spacing: 0.04em; }
   header { display: flex; justify-content: space-between; align-items: center; font-size: 20px; color: rgba(236,231,222,0.62); position: relative; z-index: 2; }
   .mark { font-family: "Instrument Serif", serif; font-style: italic; font-size: 40px; color: ${BONE}; }
-  .top { display: grid; grid-template-columns: 1fr ${c.capa_imagem ? "300px" : "0"}; gap: 32px; align-items: center; position: relative; z-index: 2; }
+  .top { display: grid; grid-template-columns: 1fr ${hasArt ? "300px" : "0"}; gap: 32px; align-items: center; position: relative; z-index: 2; }
   h1 { font-family: "Instrument Serif", serif; font-weight: 400; font-size: 78px; line-height: 1.02; }
   .sub { margin-top: 18px; font-size: 26px; line-height: 1.4; color: rgba(236,231,222,0.66); }
   .hl { font-style: italic; color: ${ACCENT}; }

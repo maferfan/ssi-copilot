@@ -19,47 +19,12 @@ export interface Post {
   created_at: string;
 }
 
-export interface Reference {
-  nome: string;
-  url: string;
-  ano: string;
-}
-
-export interface CarouselChart {
-  tipo: "bar" | "line";
-  titulo: string;
-  unidade: string;
-  dados: { label: string; valor: number }[];
-  /** null quando o gráfico é ilustrativo. */
-  fonte: Reference | null;
-  ilustrativo: boolean;
-}
-
-/** Tokens e buscas gastos para escrever o carrossel. */
-export interface CarouselCost {
+/** Tokens e buscas gastos numa chamada (ou num pedido) ao Claude. */
+export interface Cost {
   inputTokens: number;
   outputTokens: number;
   searches: number;
   usd: number;
-}
-
-export interface CarouselContent {
-  titulo: string;
-  subtitulo: string;
-  /** Gráfico da capa (slide 1): o dado mais forte, como gancho. */
-  capa_grafico?: CarouselChart;
-  /** Descrição (em inglês) da ilustração da capa, escrita pelo Claude. */
-  imagem_prompt?: string;
-  /** Ilustração da capa gerada pelo Flux (data URL JPEG); fica guardada para a publicação. */
-  capa_imagem?: string;
-  slides: { titulo: string; texto: string; grafico?: CarouselChart }[];
-  fechamento: { titulo: string; texto: string };
-  legenda: string;
-  /** Post de imagem única (terça): presente só nesse formato; aí `slides` fica vazio. */
-  imagem?: ImagePost;
-  /** Fontes usadas nos gráficos, na ordem do slide de referências. */
-  referencias?: Reference[];
-  custo?: CarouselCost;
 }
 
 /** Infográfico de uma imagem: passo a passo ou errado × certo. */
@@ -70,25 +35,39 @@ export interface ImagePost {
   bom: { titulo: string; itens: string[] };
 }
 
-/** "carousel" sai na quinta; "post" (imagem única) na terça. */
-export type PostFormat = "carousel" | "post";
+/** Conteúdo do post de imagem (guardado em JSON; os nomes dos campos ficam por compatibilidade). */
+export interface PostContent {
+  /** Título da arte (com um **destaque**). */
+  titulo: string;
+  subtitulo: string;
+  /** Descrição (em inglês) da ilustração, escrita pelo Claude. */
+  imagem_prompt?: string;
+  /** Ilustração gerada pelo Flux (data URL JPEG); fica guardada para a publicação. */
+  capa_imagem?: string;
+  /** O infográfico. Rascunhos antigos (do tempo dos carrosséis) não têm. */
+  imagem?: ImagePost;
+  /** Texto do post (português e inglês). */
+  legenda: string;
+  custo?: Cost;
+}
 
-export type CarouselStatus =
+export type DraftStatus =
   | "draft" // prévia enviada, aguardando decisão
-  | "approved" // agendado (post na terça, carrossel na quinta, 8h30)
+  | "approved" // agendado para uma terça, 8h30
   | "published"
-  | "failed" // a publicação automática falhou; o PDF foi enviado para postar à mão
+  | "failed" // a publicação automática falhou; a imagem foi enviada para postar à mão
   | "discarded";
 
-export interface Carousel {
+/** Post de imagem (fica na tabela `carousels`, do tempo em que o bot fazia carrosséis). */
+export interface PostDraft {
   id: number;
   topic: string;
-  content: CarouselContent;
-  status: CarouselStatus;
+  content: PostContent;
+  status: DraftStatus;
   created_at: string;
   published_at: string | null;
   post_url: string | null;
-  /** Dia em que sai (AAAA-MM-DD, horário de Brasília); só para aprovados. */
+  /** Terça em que sai (AAAA-MM-DD, horário de Brasília); só para aprovados. */
   scheduled_for: string | null;
 }
 
@@ -103,12 +82,10 @@ export interface WeeklyMetrics {
 /** Trabalho longo que o webhook deixa para o cron de cada minuto. */
 export type Job =
   | { kind: "daily" }
-  | { kind: "carousel"; chatId: number; topic: string; previousId?: number; instructions?: string }
   | { kind: "post"; chatId: number; topic: string; previousId?: number; instructions?: string }
   | { kind: "topics"; chatId: number }
-  | { kind: "jobs"; chatId: number }
-  /** Nova ilustração da capa; sem `scene`, usa a mesma ideia da anterior. */
-  | { kind: "image"; chatId: number; carouselId: number; scene?: string };
+  /** Nova ilustração do post; sem `scene`, usa a mesma ideia da anterior. */
+  | { kind: "image"; chatId: number; draftId: number; scene?: string };
 
 export type ActionType = "comment" | "post" | "invite" | "ssi";
 
@@ -116,12 +93,11 @@ export type ActionType = "comment" | "post" | "invite" | "ssi";
 export type Awaiting =
   | { type: "post_text"; postId: number }
   | { type: "edit"; postId: number }
-  | { type: "carousel_topic" }
   | { type: "post_topic" }
-  | { type: "carousel_adjust"; carouselId: number }
+  | { type: "post_adjust"; draftId: number }
   | { type: "metrics"; week: string }
   | { type: "invites" }
-  | { type: "carousel_image"; carouselId: number };
+  | { type: "post_image"; draftId: number };
 
 export interface Store {
   getSetting(key: string): Promise<string | null>;
@@ -130,10 +106,10 @@ export interface Store {
   getPost(id: number): Promise<Post | null>;
   updatePost(id: number, patch: Partial<Pick<Post, "author" | "text" | "status" | "draft" | "final_comment">>): Promise<void>;
   listPosts(statuses: PostStatus[], limit: number): Promise<Post[]>;
-  addCarousel(c: { topic: string; content: CarouselContent; createdAt: string }): Promise<number>;
-  getCarousel(id: number): Promise<Carousel | null>;
-  updateCarousel(id: number, patch: Partial<Pick<Carousel, "status" | "published_at" | "post_url" | "scheduled_for">>): Promise<void>;
-  listCarousels(statuses: CarouselStatus[]): Promise<Carousel[]>;
+  addDraft(c: { topic: string; content: PostContent; createdAt: string }): Promise<number>;
+  getDraft(id: number): Promise<PostDraft | null>;
+  updateDraft(id: number, patch: Partial<Pick<PostDraft, "status" | "published_at" | "post_url" | "scheduled_for">>): Promise<void>;
+  listDrafts(statuses: DraftStatus[]): Promise<PostDraft[]>;
   saveMetrics(m: WeeklyMetrics, updatedAt: string): Promise<void>;
   /** Semanas a partir de `sinceWeek`, em ordem. */
   listMetrics(sinceWeek: string): Promise<WeeklyMetrics[]>;
@@ -143,6 +119,10 @@ export interface Store {
   /** Pega os trabalhos pendentes e marca como "running" (cada um roda uma vez só). */
   takeJobs(limit: number): Promise<{ id: number; job: Job }[]>;
   finishJob(id: number, ok: boolean): Promise<void>;
+  /** Custo de uma chamada ao Claude (em US$), para o /custos e o teto mensal. */
+  addCost(kind: string, usd: number, createdAt: string): Promise<void>;
+  /** Total e quantidade de chamadas por tipo, a partir de `sinceIso`. */
+  costsSince(sinceIso: string): Promise<{ kind: string; usd: number; n: number }[]>;
   /** Quantos trabalhos há em cada estado (pending, running, done, failed). */
   jobCounts(): Promise<Record<string, number>>;
   logAction(type: ActionType, refId: number | null, createdAt: string, value?: number | null): Promise<void>;
@@ -163,7 +143,6 @@ export interface Messenger {
   answerCallback(callbackId: string, text?: string): Promise<void>;
   /** Álbum de imagens (até 10). */
   sendPhotos(chatId: number, images: Uint8Array[]): Promise<void>;
-  sendDocument(chatId: number, file: Uint8Array, filename: string, caption?: string): Promise<void>;
 }
 
 /** O "post" salvo não é um post de verdade (ex.: texto da tela de login do LinkedIn). */
@@ -185,49 +164,24 @@ export interface TopicIdea {
   conferido?: boolean;
 }
 
-/** Vaga encontrada na busca do /vagas. */
-export interface JobPosting {
-  titulo: string;
-  empresa: string;
-  regiao: "br" | "intl";
-  local: string;
-  /** Como está no anúncio, ou "não informado". */
-  salario: string;
-  /** O anúncio informa salário que atende ao mínimo (R$ 10 mil no Brasil). */
-  salario_ok: boolean;
-  /** 0 a 100: quanto o currículo atende aos requisitos (estimativa do Claude). */
-  aderencia?: number;
-  /** Por que combina com o currículo, em português. */
-  motivo: string;
-  url: string;
-}
-
-/** Gera a ilustração da capa. Devolve null se não der (o carrossel sai sem ela). */
+/** Gera a ilustração do post. Devolve null se não der (a arte sai sem ela). */
 export interface Illustrator {
   generate(prompt: string): Promise<string | null>;
 }
 
 export interface Drafter {
   draftComment(post: Pick<Post, "url" | "author" | "text">, avoid: string[]): Promise<string>;
-  /** Escreve um carrossel; com `previous` + `instructions`, ajusta uma versão anterior. */
-  draftCarousel(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent>;
   /** Post de imagem única (infográfico); com `previous` + `instructions`, ajusta. */
-  draftImagePost(topic: string, previous?: CarouselContent, instructions?: string): Promise<CarouselContent>;
+  draftImagePost(topic: string, previous?: PostContent, instructions?: string): Promise<PostContent>;
   /** Transforma a cena descrita pelo usuário (qualquer idioma) numa descrição em inglês para o Flux. */
   sceneToPrompt(scene: string): Promise<string>;
-  /** Busca vagas abertas que combinam com o currículo (Brasil e exterior). */
-  findJobs(exclude: string[]): Promise<{ items: JobPosting[]; custo: CarouselCost; links: Set<string> }>;
-  /** Pesquisa na web os assuntos em alta (software, front-end, IA) e sugere temas de carrossel. */
-  suggestTopics(): Promise<{ items: TopicIdea[]; custo: CarouselCost; sugeridos: number; links: number }>;
-}
-
-export interface RenderedCarousel {
-  pdf: Uint8Array;
-  images: Uint8Array[];
+  /** Pesquisa na web os assuntos em alta (software, front-end, IA) e sugere temas de post. */
+  suggestTopics(): Promise<{ items: TopicIdea[]; custo: Cost; sugeridos: number; links: number }>;
 }
 
 export interface Renderer {
-  render(c: CarouselContent): Promise<RenderedCarousel>;
+  /** A arte do post, em PNG. */
+  render(c: PostContent): Promise<Uint8Array>;
 }
 
 export interface LinkedInConnection {
@@ -240,8 +194,6 @@ export interface LinkedIn {
   connectUrl(): Promise<string | null>;
   connection(): Promise<LinkedInConnection | null>;
   comment(postUrn: string, text: string): Promise<void>;
-  /** Publica no perfil e devolve o link do post. */
-  publishCarousel(rendered: RenderedCarousel, title: string, caption: string): Promise<string>;
   /** Post com uma imagem só; devolve o link do post. */
   publishImage(image: Uint8Array, altText: string, caption: string): Promise<string>;
 }
@@ -270,6 +222,6 @@ export interface Deps {
   defer?: (job: Job) => Promise<void>;
   /** Versão publicada (commit), para o /status. */
   version?: string;
-  /** Ilustração da capa (Flux na Cloudflare). Sem isto, os carrosséis saem só com gráfico. */
+  /** Ilustração do post (Flux na Cloudflare). Sem isto, a arte sai sem ela. */
   illustrator?: Illustrator;
 }

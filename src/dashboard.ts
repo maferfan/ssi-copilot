@@ -1,4 +1,4 @@
-import type { Carousel, Store, WeeklyMetrics } from "./types";
+import type { PostDraft, Store, WeeklyMetrics } from "./types";
 import { lastWeeks, weekKey, weekLabel, weekStartInstant } from "./week";
 
 export const DASHBOARD_WEEKS = 12;
@@ -13,7 +13,7 @@ export interface WeekRow {
 
 export interface DashboardData {
   weeks: WeekRow[];
-  carousels: Carousel[];
+  carousels: PostDraft[];
   generatedAt: string;
 }
 
@@ -22,7 +22,7 @@ export async function loadDashboard(store: Store, now: Date): Promise<DashboardD
   const [actions, metrics, carousels] = await Promise.all([
     store.listActionsSince(weekStartInstant(keys[0]).toISOString()),
     store.listMetrics(keys[0]),
-    store.listCarousels(["published"]),
+    store.listDrafts(["published"]),
   ]);
   const byWeek = new Map(keys.map((k) => [k, { week: k, comment: 0, post: 0, invite: 0, metrics: null } as WeekRow]));
   for (const a of actions) {
@@ -166,7 +166,7 @@ export function dashboardHtml(data: DashboardData): string {
             `<li><span class="mono">${c.published_at ? weekLabel(c.published_at.slice(0, 10)) : ""}</span>${c.post_url ? `<a href="${esc(c.post_url)}" rel="noopener">${esc(c.content.titulo.replace(/\*\*/g, ""))}</a>` : esc(c.content.titulo.replace(/\*\*/g, ""))}</li>`,
         )
         .join("")}</ul>`
-    : `<p class="muted">Nenhum carrossel publicado ainda.</p>`;
+    : `<p class="muted">Nenhum post publicado ainda.</p>`;
 
   return `<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -240,7 +240,7 @@ export function dashboardHtml(data: DashboardData): string {
     <h2>O que eu fiz</h2>
     <div class="grid3">
       ${card("Comentários", `${fmt(total("comment"))} no período`, barChart("Comentários por semana", weeks, data.weeks.map((w) => w.comment), ["comentário", "comentários"]))}
-      ${card("Carrosséis publicados", `${fmt(total("post"))} no período`, barChart("Carrosséis por semana", weeks, data.weeks.map((w) => w.post), ["carrossel", "carrosséis"]))}
+      ${card("Posts publicados", `${fmt(total("post"))} no período`, barChart("Posts por semana", weeks, data.weeks.map((w) => w.post), ["post", "posts"]))}
       ${card("Convites enviados", `${fmt(total("invite"))} no período`, barChart("Convites por semana", weeks, data.weeks.map((w) => w.invite), ["convite", "convites"]))}
     </div>
   </section>
@@ -255,7 +255,7 @@ export function dashboardHtml(data: DashboardData): string {
   </section>
 
   <section>
-    <h2>Carrosséis publicados</h2>
+    <h2>Posts publicados</h2>
     ${carousels}
   </section>
 

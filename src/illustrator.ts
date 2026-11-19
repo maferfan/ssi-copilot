@@ -12,7 +12,7 @@ export function fluxPrompt(scene: string): string {
   return `${scene.trim().replace(/\.?$/, ".")} ${STYLE}`;
 }
 
-/** Ilustração da capa com o Flux 1 Schnell do Workers AI (cota grátis diária da Cloudflare). */
+/** Ilustração do post com o Flux 1 Schnell do Workers AI (cota grátis diária da Cloudflare). */
 export class FluxIllustrator implements Illustrator {
   constructor(private ai: Ai) {}
 

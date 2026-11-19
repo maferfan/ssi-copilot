@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { barChart, dashboardHtml, lineChart, loadDashboard, niceMax } from "../src/dashboard";
 import { lastWeeks, weekKey } from "../src/week";
-import { MemoryStore, sampleCarousel } from "./fakes";
+import { MemoryStore, samplePost } from "./fakes";
 
 const NOW = new Date("2026-11-06T14:00:00Z"); // sexta, semana de 02/11
 
@@ -63,8 +63,8 @@ describe("página", () => {
     await store.logAction("comment", 1, "2026-11-03T10:00:00Z");
     await store.saveMetrics({ week: "2026-10-26", profile_views: 100, impressions: 3000, followers: 200 });
     await store.saveMetrics({ week: "2026-11-02", profile_views: 120, impressions: 3400, followers: 215 });
-    const id = await store.addCarousel({ topic: "x", content: sampleCarousel("Seu site é **lento**?"), createdAt: "2026-10-30T12:00:00Z" });
-    await store.updateCarousel(id, { status: "published", published_at: "2026-10-30T21:00:00Z", post_url: "https://www.linkedin.com/feed/update/urn:li:share:9/" });
+    const id = await store.addDraft({ topic: "x", content: samplePost("Seu site é **lento**?"), createdAt: "2026-10-30T12:00:00Z" });
+    await store.updateDraft(id, { status: "published", published_at: "2026-10-30T21:00:00Z", post_url: "https://www.linkedin.com/feed/update/urn:li:share:9/" });
 
     const html = dashboardHtml(await loadDashboard(store, NOW));
     expect(html).toContain("+20 vs. semana anterior");
